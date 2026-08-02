@@ -1,0 +1,117 @@
+// Package store persists orange's small local state: the set of watched
+// stories and how much of each discussion has been read.
+package store
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sort"
+	"sync"
+)
+
+// WatchState records one watched story.
+type WatchState struct {
+	ID           int    `json:"id"`
+	Title        string `json:"title"`
+	LastReadAt   int64  `json:"last_read_at"`
+	LastComments int    `json:"last_comments"`
+}
+
+// Store is a JSON-file-backed watch list, safe for concurrent use.
+type Store struct {
+	path string
+
+	mu      sync.Mutex
+	watched map[int]WatchState
+}
+
+// Open loads the store at path, or the default per-user location when path
+// is empty. A missing file yields an empty store.
+func Open(path string) (*Store, error) {
+	if path == "" {
+		dir, err := os.UserConfigDir()
+		if err != nil {
+			return nil, err
+		}
+		path = filepath.Join(dir, "orange", "watched.json")
+	}
+	s := &Store{path: path, watched: map[int]WatchState{}}
+	b, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(b, &s.watched); err != nil {
+			return nil, err
+		}
+	case !os.IsNotExist(err):
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *Store) save() error {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(s.watched, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.path, b, 0o644)
+}
+
+// IsWatched reports whether the story is on the watch list.
+func (s *Store) IsWatched(id int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.watched[id]
+	return ok
+}
+
+// Get returns the watch state for a story.
+func (s *Store) Get(id int) (WatchState, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ws, ok := s.watched[id]
+	return ws, ok
+}
+
+// Toggle adds the story to the watch list, or removes it if present, and
+// reports whether it is now watched.
+func (s *Store) Toggle(id int, title string, comments int, now int64) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.watched[id]; ok {
+		delete(s.watched, id)
+		return false, s.save()
+	}
+	s.watched[id] = WatchState{ID: id, Title: title, LastReadAt: now, LastComments: comments}
+	return true, s.save()
+}
+
+// MarkRead records that the story's discussion has been read up to now,
+// with the given comment count. It is a no-op for unwatched stories.
+func (s *Store) MarkRead(id int, comments int, now int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ws, ok := s.watched[id]
+	if !ok {
+		return nil
+	}
+	ws.LastReadAt = now
+	ws.LastComments = comments
+	s.watched[id] = ws
+	return s.save()
+}
+
+// All returns the watch list, most recently read first.
+func (s *Store) All() []WatchState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]WatchState, 0, len(s.watched))
+	for _, ws := range s.watched {
+		out = append(out, ws)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LastReadAt > out[j].LastReadAt })
+	return out
+}
