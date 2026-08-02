@@ -1,0 +1,54 @@
+version: 2
+
+project_name: orange
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/orange
+    binary: orange
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+
+homebrew_casks:
+  - name: orange
+    repository:
+      owner: jonhadfield
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/jonhadfield/orange
+    description: Terminal reader for Hacker News
+    hooks:
+      post:
+        # The binaries are not notarized; clear the quarantine flag so
+        # Gatekeeper does not block them.
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/orange"]
+          end
