@@ -153,7 +153,7 @@ func (m watchedModel) Update(msg tea.Msg) (watchedModel, tea.Cmd) {
 
 func (m watchedModel) View() string {
 	var b strings.Builder
-	b.WriteString(styleLogo.Render("HN") + styleTabActive.Render("Watched"))
+	b.WriteString(barWithHints(styleLogo.Render("HN")+styleTabActive.Render("Watched"), m.width, viewWatched))
 	b.WriteString("\n\n")
 
 	switch {

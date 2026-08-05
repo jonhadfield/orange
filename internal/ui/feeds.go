@@ -257,17 +257,7 @@ func (m feedsModel) tabBar() string {
 		parts = append(parts, style.Render(fmt.Sprintf("%d %s", i+1, feedNames[f])))
 	}
 	left := lipgloss.JoinHorizontal(lipgloss.Center, parts...)
-
-	hint := func(k, name string) string {
-		return styleCollapsed.Render(k) + " " + styleMeta.Render(name)
-	}
-	right := hint("p", "Pulse") + "  " + hint("H", "Hiring") + "  " + hint("W", "Watched")
-
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 1
-	if gap < 2 {
-		return ansi.Truncate(left, m.width, "…")
-	}
-	return left + strings.Repeat(" ", gap) + right
+	return barWithHints(left, m.width, viewFeeds)
 }
 
 func (m feedsModel) rows(st *feedState) string {

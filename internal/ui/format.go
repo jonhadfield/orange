@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // relAge formats a unix timestamp as a compact relative age like "3h ago".
@@ -59,6 +60,37 @@ func styledLink(style lipgloss.Style, url, text string) string {
 	const marker = "\x00"
 	pre, post, _ := strings.Cut(style.Render(marker), marker)
 	return pre + hyperlink(url, text) + post
+}
+
+// navHints renders the top-right destination-view hints, omitting the view
+// the user is already on.
+func navHints(current view) string {
+	hint := func(k, name string) string {
+		return styleCollapsed.Render(k) + " " + styleMeta.Render(name)
+	}
+	var parts []string
+	if current != viewPulse {
+		parts = append(parts, hint("p", "Pulse"))
+	}
+	if current != viewHiring {
+		parts = append(parts, hint("H", "Hiring"))
+	}
+	if current != viewWatched {
+		parts = append(parts, hint("W", "Watched"))
+	}
+	return strings.Join(parts, "  ")
+}
+
+// barWithHints lays out a view's header line: left content, then the nav
+// hints right-aligned. The hints are dropped when the terminal is too
+// narrow to fit both.
+func barWithHints(left string, width int, current view) string {
+	right := navHints(current)
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right) - 1
+	if gap < 2 {
+		return ansi.Truncate(left, width, "…")
+	}
+	return left + strings.Repeat(" ", gap) + right
 }
 
 func pluralize(n int, word string) string {

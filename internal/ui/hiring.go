@@ -368,5 +368,5 @@ func (m hiringModel) View() string {
 		footer = styleCollapsed.Render("filter: "+q) + styleMeta.Render("  (/ to edit)")
 	}
 
-	return ansi.Truncate(header, m.vp.Width, "…") + "\n\n" + body + "\n" + footer
+	return barWithHints(header, m.vp.Width, viewHiring) + "\n\n" + body + "\n" + footer
 }

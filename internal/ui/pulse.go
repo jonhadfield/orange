@@ -185,7 +185,8 @@ func (m pulseModel) View() string {
 		status = fmt.Sprintf("refreshed %s · every %ds · r refreshes now",
 			relAge(m.refreshedAt.Unix(), time.Now()), int(pulseInterval.Seconds()))
 	}
-	b.WriteString(styleLogo.Render("HN") + styleTabActive.Render("Pulse") + " " + styleMeta.Render(status))
+	header := styleLogo.Render("HN") + styleTabActive.Render("Pulse") + " " + styleMeta.Render(status)
+	b.WriteString(barWithHints(header, m.width, viewPulse))
 	b.WriteString("\n\n")
 
 	switch {
