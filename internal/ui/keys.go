@@ -36,8 +36,8 @@ func newKeyMap() keyMap {
 		OpenHN:   key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "open HN page")),
 		Watch:    key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "watch/unwatch")),
 		Watched:  key.NewBinding(key.WithKeys("W"), key.WithHelp("W", "watched stories")),
-		Pulse:    key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pulse (live view)")),
-		Hiring:   key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "who is hiring")),
+		Pulse:    key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pulse")),
+		Hiring:   key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "hiring")),
 		Refresh:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Filter:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Back:     key.NewBinding(key.WithKeys("esc", "h", "b"), key.WithHelp("esc/h/b", "back")),
@@ -48,7 +48,7 @@ func newKeyMap() keyMap {
 
 // ShortHelp is the single-line hint bar shown at the bottom of the screen.
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Open, k.Back, k.Pulse, k.Hiring, k.Help, k.Quit}
+	return []key.Binding{k.Up, k.Top, k.Open, k.Back, k.Refresh, k.Pulse, k.Hiring, k.Help, k.Quit}
 }
 
 // FullHelp is the expanded overlay toggled with "?".

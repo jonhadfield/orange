@@ -123,7 +123,9 @@ func (m feedsModel) loadMore(feed hn.Feed) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 		defer cancel()
-		items, err := client.Items(ctx, ids)
+		// Always bypass the item cache: pages are usually new IDs, and
+		// after a refresh cached scores would be stale.
+		items, err := client.ItemsFresh(ctx, ids)
 		return feedItemsMsg{feed: feed, offset: offset, items: items, err: err}
 	}
 }
@@ -207,6 +209,11 @@ func (m feedsModel) handleKey(msg tea.KeyMsg) (feedsModel, tea.Cmd) {
 			st.cursor = len(st.items) - 1
 		}
 		return m, m.maybeLoadMore()
+	case key.Matches(msg, m.keys.Refresh):
+		if !st.loading {
+			*st = feedState{}
+			return m, m.loadFeed(m.feed())
+		}
 	case key.Matches(msg, m.keys.NextFeed):
 		return m.switchFeed((m.active + 1) % len(feedOrder))
 	case key.Matches(msg, m.keys.PrevFeed):

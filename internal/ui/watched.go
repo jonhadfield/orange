@@ -134,6 +134,10 @@ func (m watchedModel) Update(msg tea.Msg) (watchedModel, tea.Cmd) {
 			if len(m.rows) > 0 {
 				m.cursor = len(m.rows) - 1
 			}
+		case key.Matches(msg, m.keys.Refresh):
+			if !m.loading {
+				return m.start()
+			}
 		case key.Matches(msg, m.keys.Watch):
 			if row, ok := m.selected(); ok && m.st != nil {
 				_, _ = m.st.Toggle(row.item.ID, row.item.Title, row.item.Descendants, time.Now().Unix())

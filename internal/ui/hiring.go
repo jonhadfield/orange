@@ -237,6 +237,17 @@ func (m hiringModel) handleKey(msg tea.KeyMsg) (hiringModel, tea.Cmd) {
 		m.filtering = true
 		m.input.Focus()
 		return m, textinput.Blink
+	case key.Matches(msg, m.keys.Refresh):
+		if !m.loading {
+			m.thread = hn.Item{}
+			m.posts = nil
+			m.visible = nil
+			m.queue = nil
+			m.expanded = map[int]bool{}
+			m.cursor = 0
+			m.lineOf = m.lineOf[:0]
+			return m.start() // keeps the current filter text
+		}
 	}
 	return m, nil
 }

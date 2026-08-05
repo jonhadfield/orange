@@ -193,6 +193,11 @@ func (m storyModel) handleKey(msg tea.KeyMsg) (storyModel, tea.Cmd) {
 			(&m).renderContent()
 			(&m).ensureCursorVisible()
 		}
+	case key.Matches(msg, m.keys.Refresh):
+		// Reload via the app so the story item itself is refetched.
+		if id := m.story.ID; id != 0 && !m.loading {
+			return m, func() tea.Msg { return openItemMsg{id: id} }
+		}
 	case key.Matches(msg, m.keys.Open):
 		if m.cursor < len(m.nodes) {
 			n := m.nodes[m.cursor]

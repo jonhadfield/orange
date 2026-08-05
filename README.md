@@ -91,7 +91,7 @@ orange
 | `p`                 | Pulse: live front page with velocity          |
 | `H`                 | Who is hiring? browser                        |
 | `/` (in hiring)     | Filter job posts by keywords                  |
-| `r` (in pulse)      | Refresh now                                   |
+| `r`                 | Refresh the current view                      |
 | `esc` / `h` / `b`   | Back                                          |
 | `?`                 | Toggle help                                   |
 | `q`                 | Quit                                          |

@@ -101,8 +101,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 			defer cancel()
-			it, err := client.Item(ctx, id)
-			return itemLoadedMsg{item: it, err: err}
+			items, err := client.ItemsFresh(ctx, []int{id})
+			if err != nil || len(items) == 0 {
+				return itemLoadedMsg{err: fmt.Errorf("item %d unavailable: %w", id, err)}
+			}
+			return itemLoadedMsg{item: items[0]}
 		}
 
 	case itemLoadedMsg:
@@ -193,19 +196,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case key.Matches(msg, m.keys.Pulse) && m.view == viewFeeds:
+	// The p/H/W destination views are reachable from anywhere, matching
+	// the hints in the top bar.
+	case key.Matches(msg, m.keys.Pulse) && m.view != viewPulse:
 		m.view = viewPulse
 		var cmd tea.Cmd
 		m.pulse, cmd = m.pulse.start()
 		return m, cmd
 
-	case key.Matches(msg, m.keys.Hiring) && m.view == viewFeeds:
+	case key.Matches(msg, m.keys.Hiring) && m.view != viewHiring:
 		m.view = viewHiring
 		var cmd tea.Cmd
 		m.hiring, cmd = m.hiring.start()
 		return m, cmd
 
-	case key.Matches(msg, m.keys.Watched) && m.view == viewFeeds:
+	case key.Matches(msg, m.keys.Watched) && m.view != viewWatched:
 		m.view = viewWatched
 		var cmd tea.Cmd
 		m.watched, cmd = m.watched.start()
