@@ -233,6 +233,10 @@ func (m hiringModel) handleKey(msg tea.KeyMsg) (hiringModel, tea.Cmd) {
 			(&m).renderContent()
 			(&m).ensureCursorVisible()
 		}
+	case key.Matches(msg, m.keys.ScrollDown):
+		m.vp.SetYOffset(m.vp.YOffset + max(1, m.vp.Height/2))
+	case key.Matches(msg, m.keys.ScrollUp):
+		m.vp.SetYOffset(max(0, m.vp.YOffset-max(1, m.vp.Height/2)))
 	case key.Matches(msg, m.keys.Filter):
 		m.filtering = true
 		m.input.Focus()

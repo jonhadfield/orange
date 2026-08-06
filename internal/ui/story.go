@@ -193,6 +193,12 @@ func (m storyModel) handleKey(msg tea.KeyMsg) (storyModel, tea.Cmd) {
 			(&m).renderContent()
 			(&m).ensureCursorVisible()
 		}
+	case key.Matches(msg, m.keys.ScrollDown):
+		// Free scrolling for comments taller than the screen; the
+		// selection stays where it is.
+		m.vp.SetYOffset(m.vp.YOffset + max(1, m.vp.Height/2))
+	case key.Matches(msg, m.keys.ScrollUp):
+		m.vp.SetYOffset(max(0, m.vp.YOffset-max(1, m.vp.Height/2)))
 	case key.Matches(msg, m.keys.Refresh):
 		// Reload via the app so the story item itself is refetched.
 		if id := m.story.ID; id != 0 && !m.loading {

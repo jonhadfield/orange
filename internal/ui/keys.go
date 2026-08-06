@@ -3,32 +3,38 @@ package ui
 import "github.com/charmbracelet/bubbles/key"
 
 type keyMap struct {
-	Up       key.Binding
-	Down     key.Binding
-	Top      key.Binding
-	Bottom   key.Binding
-	NextFeed key.Binding
-	PrevFeed key.Binding
-	Open     key.Binding
-	OpenURL  key.Binding
-	OpenHN   key.Binding
-	Watch    key.Binding
-	Watched  key.Binding
-	Pulse    key.Binding
-	Hiring   key.Binding
-	Refresh  key.Binding
-	Filter   key.Binding
-	Back     key.Binding
-	Help     key.Binding
-	Quit     key.Binding
+	Up         key.Binding
+	Down       key.Binding
+	Top        key.Binding
+	Bottom     key.Binding
+	ScrollDown key.Binding
+	ScrollUp   key.Binding
+	NextFeed   key.Binding
+	PrevFeed   key.Binding
+	Open       key.Binding
+	OpenURL    key.Binding
+	OpenHN     key.Binding
+	Watch      key.Binding
+	Watched    key.Binding
+	Pulse      key.Binding
+	Hiring     key.Binding
+	Refresh    key.Binding
+	Filter     key.Binding
+	Back       key.Binding
+	Help       key.Binding
+	Quit       key.Binding
 }
 
 func newKeyMap() keyMap {
 	return keyMap{
-		Up:       key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("j/k", "move")),
-		Down:     key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j/↓", "down")),
-		Top:      key.NewBinding(key.WithKeys("g", "home"), key.WithHelp("g/G", "top/bottom")),
-		Bottom:   key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "bottom")),
+		Up:     key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("j/k", "move")),
+		Down:   key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j/↓", "down")),
+		Top:    key.NewBinding(key.WithKeys("g", "home"), key.WithHelp("g/G", "top/bottom")),
+		Bottom: key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "bottom")),
+		ScrollDown: key.NewBinding(key.WithKeys("ctrl+d", "pgdown"),
+			key.WithHelp("ctrl+d/u", "scroll half page")),
+		ScrollUp: key.NewBinding(key.WithKeys("ctrl+u", "pgup"),
+			key.WithHelp("ctrl+u", "scroll up")),
 		NextFeed: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab/1-6", "switch feed")),
 		PrevFeed: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous feed")),
 		Open:     key.NewBinding(key.WithKeys("enter", "l"), key.WithHelp("enter/l", "open / fold")),
@@ -55,6 +61,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Top, k.Bottom},
+		{k.ScrollDown, k.ScrollUp},
 		{k.NextFeed, k.PrevFeed, k.Open, k.Back},
 		{k.OpenURL, k.OpenHN, k.Watch, k.Watched},
 		{k.Pulse, k.Hiring, k.Refresh, k.Filter},
