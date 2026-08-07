@@ -339,7 +339,7 @@ func (m Model) View() string {
 		content = m.feeds.View()
 	}
 
-	bottom := m.help.View(m.keys)
+	bottom := m.help.View(m.helpKeys())
 	if m.notice != "" {
 		bottom = styleError.Render(m.notice) + "\n" + bottom
 	}

@@ -52,12 +52,8 @@ func newKeyMap() keyMap {
 	}
 }
 
-// ShortHelp is the single-line hint bar shown at the bottom of the screen.
-func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Top, k.Open, k.Back, k.Refresh, k.Pulse, k.Hiring, k.Help, k.Quit}
-}
-
-// FullHelp is the expanded overlay toggled with "?".
+// FullHelp is the expanded overlay toggled with "?". The short bar is
+// built per view; see helpKeys in helpkeys.go.
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Top, k.Bottom},
