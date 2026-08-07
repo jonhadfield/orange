@@ -34,9 +34,12 @@ func (m Model) helpKeys() viewKeys {
 			with(k.ScrollDown, "ctrl+d/u", "scroll"),
 			with(k.Open, "enter/l", "fold"),
 		}
-		if n := len(m.story.past); n > 0 {
+		if n := len(m.story.past); n == 1 {
 			short = append(short, key.NewBinding(key.WithKeys("1"),
-				key.WithHelp("1-"+strconv.Itoa(n), "past discussion")))
+				key.WithHelp("1", "past discussion")))
+		} else if n > 1 {
+			short = append(short, key.NewBinding(key.WithKeys("1"),
+				key.WithHelp("1-"+strconv.Itoa(n), "past discussions")))
 		}
 		short = append(short,
 			with(k.OpenURL, "o", "open link"),
