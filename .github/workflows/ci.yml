@@ -44,6 +44,9 @@ jobs:
         with:
           go-version: stable
 
-      - uses: golangci/golangci-lint-action@v6
+      # v6 resolves "latest" within the golangci-lint v1 line, which is built
+      # with an older Go than this module targets and refuses to load. v9
+      # tracks the v2 line; the version is pinned so it cannot drift back.
+      - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.12.2
