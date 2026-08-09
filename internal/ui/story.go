@@ -254,19 +254,45 @@ func (m storyModel) Update(msg tea.Msg) (storyModel, tea.Cmd) {
 func (m storyModel) handleKey(msg tea.KeyPressMsg) (storyModel, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Down):
-		if m.cursor < len(m.nodes)-1 {
+		switch {
+		case m.cursorOffScreen():
+			// Free scrolling moved the view and left the selection behind,
+			// so continue from what is on screen instead of snapping back.
+			if next := m.nodeFrom(m.vp.YOffset()); next >= 0 {
+				m.cursor = next
+				(&m).renderContent()
+				(&m).ensureCursorVisible()
+			} else {
+				// Scrolled past every comment: take the last one without
+				// dragging the view back to it, and keep scrolling.
+				m.cursor = len(m.nodes) - 1
+				(&m).renderContent()
+				m.vp.ScrollDown(1)
+			}
+		case m.cursor < len(m.nodes)-1:
 			m.cursor++
 			(&m).renderContent()
 			(&m).ensureCursorVisible()
-		} else {
+		default:
 			m.vp.ScrollDown(1)
 		}
 	case key.Matches(msg, m.keys.Up):
-		if m.cursor > 0 {
+		switch {
+		case m.cursorOffScreen():
+			if prev := m.nodeUpTo(m.vp.YOffset() + m.vp.Height() - 1); prev >= 0 {
+				m.cursor = prev
+				(&m).renderContent()
+				(&m).ensureCursorVisible()
+			} else {
+				m.cursor = 0
+				(&m).renderContent()
+				m.vp.SetYOffset(0)
+			}
+		case m.cursor > 0:
 			m.cursor--
 			(&m).renderContent()
 			(&m).ensureCursorVisible()
-		} else {
+		default:
 			m.vp.SetYOffset(0) // reveal the story header
 		}
 	case key.Matches(msg, m.keys.Top):
@@ -307,6 +333,41 @@ func (m storyModel) handleKey(msg tea.KeyPressMsg) (storyModel, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// cursorOffScreen reports whether the selected comment has been scrolled out
+// of view. That is exactly what free scrolling does: it moves the viewport
+// and deliberately leaves the selection where it was.
+func (m *storyModel) cursorOffScreen() bool {
+	if m.cursor >= len(m.lineOf) {
+		return false
+	}
+	line := m.lineOf[m.cursor]
+	return line < m.vp.YOffset() || line >= m.vp.YOffset()+m.vp.Height()
+}
+
+// nodeFrom returns the first comment starting at or below the given content
+// line, or -1 when every comment starts above it. Reading down, that is the
+// next comment the reader can see, whether it is already on screen or just
+// below the fold of a long comment they are part-way through.
+func (m *storyModel) nodeFrom(line int) int {
+	for i, l := range m.lineOf {
+		if l >= line {
+			return i
+		}
+	}
+	return -1
+}
+
+// nodeUpTo is nodeFrom from the other end: the last comment starting at or
+// above the given line, or -1 when every comment starts below it.
+func (m *storyModel) nodeUpTo(line int) int {
+	for i := len(m.lineOf) - 1; i >= 0; i-- {
+		if m.lineOf[i] <= line {
+			return i
+		}
+	}
+	return -1
 }
 
 func (m *storyModel) ensureCursorVisible() {

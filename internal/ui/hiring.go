@@ -207,13 +207,37 @@ func (m hiringModel) handleKey(msg tea.KeyPressMsg) (hiringModel, tea.Cmd) {
 
 	switch {
 	case key.Matches(msg, m.keys.Down):
-		if m.cursor < len(m.visible)-1 {
+		// As in the story view: after free scrolling, carry on from the
+		// post that is on screen rather than snapping back.
+		switch {
+		case m.cursorOffScreen():
+			if next := m.postFrom(m.vp.YOffset()); next >= 0 {
+				m.cursor = next
+				(&m).renderContent()
+				(&m).ensureCursorVisible()
+			} else {
+				m.cursor = len(m.visible) - 1
+				(&m).renderContent()
+				m.vp.ScrollDown(1)
+			}
+		case m.cursor < len(m.visible)-1:
 			m.cursor++
 			(&m).renderContent()
 			(&m).ensureCursorVisible()
 		}
 	case key.Matches(msg, m.keys.Up):
-		if m.cursor > 0 {
+		switch {
+		case m.cursorOffScreen():
+			if prev := m.postUpTo(m.vp.YOffset() + m.vp.Height() - 1); prev >= 0 {
+				m.cursor = prev
+				(&m).renderContent()
+				(&m).ensureCursorVisible()
+			} else {
+				m.cursor = 0
+				(&m).renderContent()
+				m.vp.SetYOffset(0)
+			}
+		case m.cursor > 0:
 			m.cursor--
 			(&m).renderContent()
 			(&m).ensureCursorVisible()
@@ -277,6 +301,37 @@ func (m *hiringModel) recompute() {
 	if m.cursor >= len(m.visible) {
 		m.cursor = max(0, len(m.visible)-1)
 	}
+}
+
+// cursorOffScreen reports whether the selected post has been scrolled out of
+// view, which is what free scrolling does.
+func (m *hiringModel) cursorOffScreen() bool {
+	if m.cursor >= len(m.lineOf) {
+		return false
+	}
+	line := m.lineOf[m.cursor]
+	return line < m.vp.YOffset() || line >= m.vp.YOffset()+m.vp.Height()
+}
+
+// postFrom returns the first post starting at or below the given content
+// line, or -1 when every post starts above it.
+func (m *hiringModel) postFrom(line int) int {
+	for i, l := range m.lineOf {
+		if l >= line {
+			return i
+		}
+	}
+	return -1
+}
+
+// postUpTo is postFrom from the other end, for moving up.
+func (m *hiringModel) postUpTo(line int) int {
+	for i := len(m.lineOf) - 1; i >= 0; i-- {
+		if m.lineOf[i] <= line {
+			return i
+		}
+	}
+	return -1
 }
 
 func (m *hiringModel) ensureCursorVisible() {
