@@ -31,7 +31,8 @@ func main() {
 	browser.Stdout = io.Discard
 	browser.Stderr = io.Discard
 
-	client := hn.NewClient("")
+	client := hn.NewClient("", hn.WithUserAgent(
+		"orange/"+version+" (+https://github.com/jonhadfield/orange)"))
 	st, err := store.Open("")
 	if err != nil {
 		// Watching is disabled but the reader still works.
