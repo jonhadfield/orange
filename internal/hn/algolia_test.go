@@ -76,3 +76,84 @@ func TestLatestHiringThreadNotFound(t *testing.T) {
 		t.Error("got nil error, want error when no hiring thread exists")
 	}
 }
+
+func TestItemTreeFlattensParentsBeforeChildren(t *testing.T) {
+	c := newAlgoliaClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/items/100" {
+			http.NotFound(w, r)
+			return
+		}
+		// The shape Algolia actually returns: the story at the root, with
+		// comments nested under "children" and nullable author/text.
+		w.Write([]byte(`{
+			"id":100,"type":"story","title":"story","parent_id":null,
+			"author":"op","text":null,"created_at_i":1000,
+			"children":[
+				{"id":1,"type":"comment","parent_id":100,"author":"a","text":"first","created_at_i":1001,"children":[
+					{"id":3,"type":"comment","parent_id":1,"author":"c","text":"reply","created_at_i":1003,"children":[]}
+				]},
+				{"id":2,"type":"comment","parent_id":100,"author":"b","text":"second","created_at_i":1002,"children":[]}
+			]}`))
+	})
+
+	got, err := c.ItemTree(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ItemTree: %v", err)
+	}
+	// Depth-first with parents ahead of their children, so a single pass
+	// can build the tree without ever holding an unattachable node.
+	var ids []int
+	for _, it := range got {
+		ids = append(ids, it.ID)
+	}
+	if want := []int{1, 3, 2}; !equal(ids, want) {
+		t.Fatalf("ItemTree order = %v, want %v", ids, want)
+	}
+	if got[0].Parent != 100 || got[1].Parent != 1 {
+		t.Errorf("parents = %d, %d; want 100, 1", got[0].Parent, got[1].Parent)
+	}
+	if got[0].By != "a" || got[0].Text != "first" || got[0].Time != 1001 {
+		t.Errorf("first comment = %+v, want author a / text first / time 1001", got[0])
+	}
+	if len(got[0].Kids) != 1 || got[0].Kids[0] != 3 {
+		t.Errorf("kids of comment 1 = %v, want [3]", got[0].Kids)
+	}
+	for _, it := range got {
+		if it.ID == 100 {
+			t.Error("ItemTree included the story root, which is not a comment")
+		}
+	}
+}
+
+func TestItemTreeMarksStrippedCommentsDeleted(t *testing.T) {
+	c := newAlgoliaClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"id":100,"type":"story","children":[
+			{"id":1,"type":"comment","parent_id":100,"author":null,"text":null,"created_at_i":1,"children":[
+				{"id":2,"type":"comment","parent_id":1,"author":"a","text":"kept","created_at_i":2,"children":[]}
+			]}
+		]}`))
+	})
+
+	got, err := c.ItemTree(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ItemTree: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d items, want 2", len(got))
+	}
+	if !got[0].Deleted {
+		t.Error("comment with null author and text should be marked deleted")
+	}
+	if got[1].Deleted {
+		t.Error("comment with author and text should not be marked deleted")
+	}
+}
+
+func TestItemTreeMissingItem(t *testing.T) {
+	c := newAlgoliaClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{}`))
+	})
+	if _, err := c.ItemTree(context.Background(), 100); err == nil {
+		t.Error("ItemTree for an unknown item: got nil error, want error")
+	}
+}

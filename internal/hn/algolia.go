@@ -73,6 +73,73 @@ func (c *Client) PastDiscussions(ctx context.Context, storyURL string, excludeID
 	return out, nil
 }
 
+// algoliaNode is one item in Algolia's nested item tree. Absent fields come
+// back as JSON null, so the nullable ones are pointers.
+type algoliaNode struct {
+	ID         int           `json:"id"`
+	Type       string        `json:"type"`
+	Author     *string       `json:"author"`
+	Text       *string       `json:"text"`
+	ParentID   *int          `json:"parent_id"`
+	CreatedAtI int64         `json:"created_at_i"`
+	Children   []algoliaNode `json:"children"`
+}
+
+// ItemTree returns every comment on a story in a single request, flattened
+// depth-first with parents ahead of their children so callers can build the
+// tree in one pass.
+//
+// This is a fast path, not a complete one: Algolia omits dead and deleted
+// comments along with their entire subtrees, and its index trails the live
+// site by minutes. Callers that need every comment must reconcile against the
+// Firebase API afterwards.
+func (c *Client) ItemTree(ctx context.Context, id int) ([]Item, error) {
+	var root algoliaNode
+	if err := c.getURL(ctx, fmt.Sprintf("%s/items/%d", c.algoliaURL, id), &root); err != nil {
+		return nil, err
+	}
+	if root.ID == 0 {
+		return nil, fmt.Errorf("hn: item %d not found", id)
+	}
+	var out []Item
+	var walk func(nodes []algoliaNode)
+	walk = func(nodes []algoliaNode) {
+		for _, n := range nodes {
+			out = append(out, n.item())
+			walk(n.Children)
+		}
+	}
+	walk(root.Children)
+	return out, nil
+}
+
+// item converts an Algolia node to the Item shape used across the app.
+func (n algoliaNode) item() Item {
+	it := Item{
+		ID:   n.ID,
+		Type: n.Type,
+		Time: n.CreatedAtI,
+	}
+	if n.Author != nil {
+		it.By = *n.Author
+	}
+	if n.Text != nil {
+		it.Text = *n.Text
+	}
+	if n.ParentID != nil {
+		it.Parent = *n.ParentID
+	}
+	// Algolia normally drops removed comments entirely, but when it does
+	// surface one it arrives stripped of both author and text.
+	if n.Author == nil && n.Text == nil {
+		it.Deleted = true
+	}
+	for _, ch := range n.Children {
+		it.Kids = append(it.Kids, ch.ID)
+	}
+	return it
+}
+
 // LatestHiringThread returns the item ID of the most recent monthly
 // "Ask HN: Who is hiring?" thread.
 func (c *Client) LatestHiringThread(ctx context.Context) (int, error) {

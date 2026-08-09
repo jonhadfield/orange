@@ -3,6 +3,7 @@ package hn
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -76,7 +77,7 @@ func TestItemsPreservesOrder(t *testing.T) {
 	}
 }
 
-func TestItemsSkipsMissing(t *testing.T) {
+func TestItemsReportsPartialFailure(t *testing.T) {
 	items := map[int]Item{
 		1: {ID: 1, Type: "story", Title: "one"},
 		3: {ID: 3, Type: "story", Title: "three"},
@@ -85,11 +86,90 @@ func TestItemsSkipsMissing(t *testing.T) {
 	c := NewClient(srv.URL)
 
 	got, err := c.Items(context.Background(), []int{1, 2, 3})
-	if err != nil {
-		t.Fatalf("Items: %v", err)
-	}
+	// The items that did load are still returned, but the caller must be
+	// able to tell that one went missing rather than silently losing it.
 	if len(got) != 2 || got[0].ID != 1 || got[1].ID != 3 {
 		t.Errorf("Items = %+v, want items 1 and 3", got)
+	}
+	var partial *PartialError
+	if !errors.As(err, &partial) {
+		t.Fatalf("Items error = %v, want *PartialError", err)
+	}
+	if partial.Fetched != 2 || partial.Requested != 3 {
+		t.Errorf("PartialError = %d of %d, want 2 of 3", partial.Fetched, partial.Requested)
+	}
+}
+
+func TestItemsAllPresentReportsNoError(t *testing.T) {
+	items := map[int]Item{1: {ID: 1, Type: "story"}, 2: {ID: 2, Type: "story"}}
+	srv := newTestServer(t, nil, items, nil)
+	c := NewClient(srv.URL)
+
+	if _, err := c.Items(context.Background(), []int{1, 2}); err != nil {
+		t.Errorf("Items with everything present: got %v, want nil", err)
+	}
+}
+
+func TestSendsUserAgent(t *testing.T) {
+	got := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case got <- r.Header.Get("User-Agent"):
+		default:
+		}
+		fmt.Fprint(w, "[]")
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(srv.URL, WithUserAgent("orange/1.2.3"))
+
+	if _, err := c.FeedIDs(context.Background(), FeedTop); err != nil {
+		t.Fatalf("FeedIDs: %v", err)
+	}
+	if ua := <-got; ua != "orange/1.2.3" {
+		t.Errorf("User-Agent = %q, want %q", ua, "orange/1.2.3")
+	}
+}
+
+func TestRetriesServerErrors(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hits.Add(1) < 3 {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprint(w, "[1,2]")
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(srv.URL)
+	c.retryBase = 0
+
+	ids, err := c.FeedIDs(context.Background(), FeedTop)
+	if err != nil {
+		t.Fatalf("FeedIDs after transient 500s: %v", err)
+	}
+	if want := []int{1, 2}; !equal(ids, want) {
+		t.Errorf("FeedIDs = %v, want %v", ids, want)
+	}
+	if hits.Load() != 3 {
+		t.Errorf("server hits = %d, want 3 (two failures then success)", hits.Load())
+	}
+}
+
+func TestDoesNotRetryNotFound(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(srv.URL)
+	c.retryBase = 0
+
+	if _, err := c.FeedIDs(context.Background(), FeedTop); err == nil {
+		t.Error("FeedIDs against 404: got nil error, want error")
+	}
+	if hits.Load() != 1 {
+		t.Errorf("server hits = %d, want 1 (404 is not transient)", hits.Load())
 	}
 }
 
@@ -124,6 +204,7 @@ func TestServerErrorSurfaces(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	c := NewClient(srv.URL)
+	c.retryBase = 0 // exhaust the retries without the backoff wait
 
 	if _, err := c.FeedIDs(context.Background(), FeedTop); err == nil {
 		t.Error("FeedIDs against 500 server: got nil error, want error")
