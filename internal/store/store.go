@@ -49,15 +49,41 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
+// save rewrites the store atomically: a crash or a full disk mid-write leaves
+// the previous watch list intact rather than a truncated file.
 func (s *Store) save() error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(s.watched, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, b, 0o644)
+	// The temp file must share a filesystem with the target for the rename
+	// to be atomic, so it goes in the same directory.
+	f, err := os.CreateTemp(dir, ".watched-*.json")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp) // no-op once the rename succeeds
+
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.path)
 }
 
 // IsWatched reports whether the story is on the watch list.
