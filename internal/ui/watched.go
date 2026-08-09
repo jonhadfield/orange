@@ -118,6 +118,19 @@ func (m watchedModel) Update(msg tea.Msg) (watchedModel, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.MouseWheelMsg:
+		switch msg.Button {
+		case tea.MouseWheelDown:
+			if m.cursor < len(m.rows)-1 {
+				m.cursor++
+			}
+		case tea.MouseWheelUp:
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		}
+		return m, nil
+
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, m.keys.Down):

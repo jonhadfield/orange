@@ -184,6 +184,23 @@ func (m feedsModel) Update(msg tea.Msg) (feedsModel, tea.Cmd) {
 		st.items = append(st.items, msg.items...)
 		return m, nil
 
+	case tea.MouseWheelMsg:
+		// A list has no viewport of its own, so the wheel moves the
+		// selection and the visible window follows it.
+		st := m.state()
+		switch msg.Button {
+		case tea.MouseWheelDown:
+			if st.cursor < len(st.items)-1 {
+				st.cursor++
+			}
+			return m, m.maybeLoadMore()
+		case tea.MouseWheelUp:
+			if st.cursor > 0 {
+				st.cursor--
+			}
+		}
+		return m, nil
+
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}

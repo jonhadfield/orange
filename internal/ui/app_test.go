@@ -36,6 +36,39 @@ func TestViewRendersAndOwnsAltScreen(t *testing.T) {
 	}
 }
 
+func TestViewRequestsMouseReporting(t *testing.T) {
+	m := newTestModel(t)
+	// Without this the terminal keeps wheel and trackpad events to itself
+	// and the app never sees them.
+	if got := m.View().MouseMode; got != tea.MouseModeCellMotion {
+		t.Errorf("View().MouseMode = %v, want MouseModeCellMotion", got)
+	}
+}
+
+func TestWheelReachesTheActiveView(t *testing.T) {
+	m := newTestModel(t)
+	// Seed the feed so the cursor has somewhere to go.
+	st := m.feeds.state()
+	for i := 1; i <= 10; i++ {
+		st.ids = append(st.ids, i)
+		st.items = append(st.items, hn.Item{ID: i, Type: "story", Title: "story", By: "someone"})
+	}
+
+	// The root model has no case for mouse messages, so this also checks
+	// they fall through to the active view rather than being dropped.
+	next, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 5, Y: 5})
+	m = next.(Model)
+	if got := m.feeds.state().cursor; got != 1 {
+		t.Fatalf("feed cursor = %d after one wheel notch, want 1", got)
+	}
+
+	next, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp, X: 5, Y: 5})
+	m = next.(Model)
+	if got := m.feeds.state().cursor; got != 0 {
+		t.Errorf("feed cursor = %d after wheeling back up, want 0", got)
+	}
+}
+
 func TestViewBeforeSizeIsEmptyButStillAltScreen(t *testing.T) {
 	m := New(hn.NewClient("http://unused.invalid"), nil)
 	v := m.View()

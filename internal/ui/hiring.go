@@ -179,6 +179,17 @@ func (m hiringModel) Update(msg tea.Msg) (hiringModel, tea.Cmd) {
 		(&m).renderContent()
 		return m, (&m).nextBatch()
 
+	case tea.MouseWheelMsg:
+		switch msg.Button {
+		case tea.MouseWheelDown:
+			m.vp.SetYOffset(m.vp.YOffset() + wheelLines)
+			(&m).selectTopPost()
+		case tea.MouseWheelUp:
+			m.vp.SetYOffset(max(0, m.vp.YOffset()-wheelLines))
+			(&m).selectTopPost()
+		}
+		return m, nil
+
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
