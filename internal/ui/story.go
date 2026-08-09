@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonhadfield/orange/internal/hn"
@@ -73,13 +73,13 @@ func newStoryModel(client *hn.Client, keys keyMap) storyModel {
 		client:  client,
 		keys:    keys,
 		spinner: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(stylePoints)),
-		vp:      viewport.New(0, 0),
+		vp:      viewport.New(),
 	}
 }
 
 func (m *storyModel) setSize(w, h int) {
-	m.vp.Width = w
-	m.vp.Height = max(1, h-1) // reserve one line for the status footer
+	m.vp.SetWidth(w)
+	m.vp.SetHeight(max(1, h-1)) // reserve one line for the status footer
 	if m.tree != nil {
 		m.renderContent()
 		m.ensureCursorVisible()
@@ -245,13 +245,13 @@ func (m storyModel) Update(msg tea.Msg) (storyModel, tea.Cmd) {
 		(&m).ensureCursorVisible()
 		return m, (&m).fillBatches()
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
 	return m, nil
 }
 
-func (m storyModel) handleKey(msg tea.KeyMsg) (storyModel, tea.Cmd) {
+func (m storyModel) handleKey(msg tea.KeyPressMsg) (storyModel, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Down):
 		if m.cursor < len(m.nodes)-1 {
@@ -282,9 +282,9 @@ func (m storyModel) handleKey(msg tea.KeyMsg) (storyModel, tea.Cmd) {
 	case key.Matches(msg, m.keys.ScrollDown):
 		// Free scrolling for comments taller than the screen; the
 		// selection stays where it is.
-		m.vp.SetYOffset(m.vp.YOffset + max(1, m.vp.Height/2))
+		m.vp.SetYOffset(m.vp.YOffset() + max(1, m.vp.Height()/2))
 	case key.Matches(msg, m.keys.ScrollUp):
-		m.vp.SetYOffset(max(0, m.vp.YOffset-max(1, m.vp.Height/2)))
+		m.vp.SetYOffset(max(0, m.vp.YOffset()-max(1, m.vp.Height()/2)))
 	case key.Matches(msg, m.keys.Refresh):
 		// Reload via the app so the story item itself is refetched.
 		if id := m.story.ID; id != 0 && !m.loading {
@@ -315,17 +315,17 @@ func (m *storyModel) ensureCursorVisible() {
 	}
 	target := m.lineOf[m.cursor]
 	switch {
-	case target < m.vp.YOffset:
+	case target < m.vp.YOffset():
 		m.vp.SetYOffset(target)
-	case target > m.vp.YOffset+m.vp.Height-4:
-		m.vp.SetYOffset(target - m.vp.Height + 4)
+	case target > m.vp.YOffset()+m.vp.Height()-4:
+		m.vp.SetYOffset(target - m.vp.Height() + 4)
 	}
 }
 
 // renderContent rebuilds the viewport content (header plus visible comment
 // tree) and records the line offset of every visible node.
 func (m *storyModel) renderContent() {
-	if m.vp.Width <= 0 || m.tree == nil {
+	if m.vp.Width() <= 0 || m.tree == nil {
 		return
 	}
 	m.nodes = m.tree.visible()
@@ -353,7 +353,7 @@ func (m *storyModel) renderContent() {
 }
 
 func (m *storyModel) header(now time.Time) string {
-	w := m.vp.Width
+	w := m.vp.Width()
 	var b strings.Builder
 	b.WriteString(styleHeaderTitle.Width(w).Render(m.story.Title))
 	b.WriteString("\n")
@@ -425,7 +425,7 @@ func (m *storyModel) renderNode(n *commentNode, selected bool, now time.Time) st
 
 	block := meta
 	if !n.collapsed && !n.placeholder {
-		wrapWidth := max(20, m.vp.Width-indentWidth-1)
+		wrapWidth := max(20, m.vp.Width()-indentWidth-1)
 		block += "\n" + lipgloss.NewStyle().Width(wrapWidth).Render(n.text)
 	}
 

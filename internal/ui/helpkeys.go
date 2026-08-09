@@ -3,7 +3,7 @@ package ui
 import (
 	"strconv"
 
-	"github.com/charmbracelet/bubbles/key"
+	"charm.land/bubbles/v2/key"
 )
 
 // viewKeys is what the help bubble renders for the active view: the short

@@ -9,11 +9,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/pkg/browser"
 
 	"github.com/jonhadfield/orange/internal/hn"
@@ -72,13 +72,29 @@ func New(client *hn.Client, st *store.Store) Model {
 	}
 }
 
-func (m Model) Init() tea.Cmd { return m.feeds.init() }
+func (m Model) Init() tea.Cmd {
+	// The palette is chosen from the terminal background, which v2 reports
+	// in reply to this request rather than resolving per colour at render
+	// time as AdaptiveColor used to.
+	return tea.Batch(m.feeds.init(), tea.RequestBackgroundColor)
+}
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.BackgroundColorMsg:
+		setTheme(msg.IsDark())
+		// The spinners copied their style when they were built, so they
+		// need the rebuilt one handing back to them.
+		m.feeds.spinner.Style = stylePoints
+		m.story.spinner.Style = stylePoints
+		m.pulse.spinner.Style = stylePoints
+		m.watched.spinner.Style = stylePoints
+		m.hiring.spinner.Style = stylePoints
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.help.Width = msg.Width
+		m.help.SetWidth(msg.Width)
 		content := max(1, msg.Height-2)
 		m.feeds.setSize(msg.Width, content)
 		m.story.setSize(msg.Width, content)
@@ -87,7 +103,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.hiring.setSize(msg.Width, content)
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 
 	case browserOpenedMsg:
@@ -166,7 +182,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m.delegate(msg)
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// The hiring filter input owns the keyboard while active.
 	if m.view == viewHiring && m.hiring.capturing() {
 		var cmd tea.Cmd
@@ -321,9 +337,13 @@ func (m Model) current() (hn.Item, bool) {
 	}
 }
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
+	// v2 makes the alternate screen a property of the view rather than a
+	// program option, so it is declared on every frame.
+	v := tea.NewView("")
+	v.AltScreen = true
 	if m.width == 0 {
-		return ""
+		return v
 	}
 	var content string
 	switch m.view {
@@ -350,7 +370,8 @@ func (m Model) View() string {
 		MaxHeight(contentHeight).
 		MaxWidth(m.width).
 		Render(content)
-	return content + "\n" + bottom
+	v.Content = content + "\n" + bottom
+	return v
 }
 
 func hnItemURL(id int) string {
