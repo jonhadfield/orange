@@ -306,11 +306,13 @@ func (m storyModel) handleKey(msg tea.KeyPressMsg) (storyModel, tea.Cmd) {
 			(&m).ensureCursorVisible()
 		}
 	case key.Matches(msg, m.keys.ScrollDown):
-		// Free scrolling for comments taller than the screen; the
-		// selection stays where it is.
+		// Free scrolling for comments taller than the screen. The
+		// selection follows, so the comment being read stays highlighted.
 		m.vp.SetYOffset(m.vp.YOffset() + max(1, m.vp.Height()/2))
+		(&m).selectTopComment()
 	case key.Matches(msg, m.keys.ScrollUp):
 		m.vp.SetYOffset(max(0, m.vp.YOffset()-max(1, m.vp.Height()/2)))
+		(&m).selectTopComment()
 	case key.Matches(msg, m.keys.Refresh):
 		// Reload via the app so the story item itself is refetched.
 		if id := m.story.ID; id != 0 && !m.loading {
@@ -357,6 +359,37 @@ func (m *storyModel) nodeFrom(line int) int {
 		}
 	}
 	return -1
+}
+
+// nodeInView returns the first comment whose header is on screen, or -1 when
+// none is — which happens inside a comment taller than the whole viewport.
+func (m *storyModel) nodeInView() int {
+	top, bottom := m.vp.YOffset(), m.vp.YOffset()+m.vp.Height()
+	for i, l := range m.lineOf {
+		if l >= top {
+			if l < bottom {
+				return i
+			}
+			break // sorted, so nothing later is in view either
+		}
+	}
+	return -1
+}
+
+// selectTopComment highlights the comment at the top of the viewport: the
+// first whose header is on screen, or, when the reader is part-way through
+// one taller than the screen, the comment they are inside. The viewport is
+// left exactly where the reader scrolled it.
+func (m *storyModel) selectTopComment() {
+	i := m.nodeInView()
+	if i < 0 {
+		i = m.nodeUpTo(m.vp.YOffset())
+	}
+	if i < 0 {
+		i = 0
+	}
+	m.cursor = i
+	m.renderContent()
 }
 
 // nodeUpTo is nodeFrom from the other end: the last comment starting at or

@@ -259,9 +259,12 @@ func (m hiringModel) handleKey(msg tea.KeyPressMsg) (hiringModel, tea.Cmd) {
 			(&m).ensureCursorVisible()
 		}
 	case key.Matches(msg, m.keys.ScrollDown):
+		// The selection follows the scroll, as in the story view.
 		m.vp.SetYOffset(m.vp.YOffset() + max(1, m.vp.Height()/2))
+		(&m).selectTopPost()
 	case key.Matches(msg, m.keys.ScrollUp):
 		m.vp.SetYOffset(max(0, m.vp.YOffset()-max(1, m.vp.Height()/2)))
+		(&m).selectTopPost()
 	case key.Matches(msg, m.keys.Filter):
 		m.filtering = true
 		m.input.Focus()
@@ -322,6 +325,35 @@ func (m *hiringModel) postFrom(line int) int {
 		}
 	}
 	return -1
+}
+
+// postInView returns the first post whose header is on screen, or -1 when
+// none is.
+func (m *hiringModel) postInView() int {
+	top, bottom := m.vp.YOffset(), m.vp.YOffset()+m.vp.Height()
+	for i, l := range m.lineOf {
+		if l >= top {
+			if l < bottom {
+				return i
+			}
+			break // sorted, so nothing later is in view either
+		}
+	}
+	return -1
+}
+
+// selectTopPost highlights the post at the top of the viewport, leaving the
+// viewport where the reader scrolled it.
+func (m *hiringModel) selectTopPost() {
+	i := m.postInView()
+	if i < 0 {
+		i = m.postUpTo(m.vp.YOffset())
+	}
+	if i < 0 {
+		i = 0
+	}
+	m.cursor = i
+	m.renderContent()
 }
 
 // postUpTo is postFrom from the other end, for moving up.

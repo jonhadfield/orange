@@ -13,6 +13,17 @@ func keyPress(s string) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: rune(s[0]), Text: s}
 }
 
+func ctrlPress(c rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: c, Mod: tea.ModCtrl}
+}
+
+// headerVisible reports whether the selected comment's header is on screen,
+// which is what makes the highlight something the reader can actually see.
+func headerVisible(m storyModel) bool {
+	line := m.lineOf[m.cursor]
+	return line >= m.vp.YOffset() && line < m.vp.YOffset()+m.vp.Height()
+}
+
 // newScrollTestModel builds a story view holding more comments than fit on
 // screen, so the viewport can be scrolled away from the selection.
 func newScrollTestModel(t *testing.T, n int) storyModel {
@@ -52,6 +63,96 @@ func keyMatchesDown(t *testing.T) bool {
 	before := m.cursor
 	m, _ = m.handleKey(keyPress("j"))
 	return m.cursor != before
+}
+
+func TestScrollMatchesBinding(t *testing.T) {
+	// Guards the harness: the scroll tests are meaningless if the
+	// synthesised ctrl+d does not match the binding.
+	m := newScrollTestModel(t, 40)
+	before := m.vp.YOffset()
+	m, _ = m.handleKey(ctrlPress('d'))
+	if m.vp.YOffset() == before {
+		t.Fatal("ctrl+d did not scroll; the synthesised key does not match the binding")
+	}
+}
+
+func TestScrollingHighlightsTheCommentBeingRead(t *testing.T) {
+	m := newScrollTestModel(t, 60)
+	if m.cursor != 0 {
+		t.Fatalf("cursor starts at %d, want 0", m.cursor)
+	}
+
+	step := max(1, m.vp.Height()/2)
+	want := m.vp.YOffset() + step
+
+	m, _ = m.handleKey(ctrlPress('d'))
+
+	if m.cursor == 0 {
+		t.Error("selection stayed on the first comment after scrolling")
+	}
+	if !headerVisible(m) {
+		t.Errorf("selected comment %d starts at line %d, outside the view [%d,%d): "+
+			"the highlight would not be visible",
+			m.cursor, m.lineOf[m.cursor], m.vp.YOffset(), m.vp.YOffset()+m.vp.Height())
+	}
+	// It must be the topmost comment on screen.
+	if m.cursor > 0 && m.lineOf[m.cursor-1] >= m.vp.YOffset() {
+		t.Errorf("selected comment %d is not the topmost one in view", m.cursor)
+	}
+	// The scroll must not be fought by re-centring on the selection.
+	if m.vp.YOffset() != want {
+		t.Errorf("Y offset = %d after scrolling, want %d: the view was moved to chase the selection",
+			m.vp.YOffset(), want)
+	}
+}
+
+func TestRepeatedScrollingKeepsAdvancingTheSelection(t *testing.T) {
+	m := newScrollTestModel(t, 80)
+
+	seen := []int{m.cursor}
+	for range 4 {
+		m, _ = m.handleKey(ctrlPress('d'))
+		seen = append(seen, m.cursor)
+		if !headerVisible(m) {
+			t.Fatalf("selected comment %d is off screen after scrolling", m.cursor)
+		}
+	}
+	for i := 1; i < len(seen); i++ {
+		if seen[i] <= seen[i-1] {
+			t.Fatalf("selection did not advance while scrolling down: %v", seen)
+		}
+	}
+
+	// And back up again.
+	m, _ = m.handleKey(ctrlPress('u'))
+	if m.cursor >= seen[len(seen)-1] {
+		t.Errorf("cursor = %d after scrolling up, want less than %d", m.cursor, seen[len(seen)-1])
+	}
+	if !headerVisible(m) {
+		t.Errorf("selected comment %d is off screen after scrolling up", m.cursor)
+	}
+}
+
+// Inside a comment taller than the whole screen no header is visible, so the
+// selection stays on the comment actually being read.
+func TestScrollingInsideAHugeCommentKeepsItSelected(t *testing.T) {
+	m := newStoryModel(hn.NewClient("http://unused.invalid"), newKeyMap())
+	m.story = hn.Item{ID: 100, Title: "a story"}
+	m.tree = newCommentTree(100)
+	huge := strings.Repeat("an enormous comment that wraps over very many lines indeed. ", 200)
+	m.tree.add([]hn.Item{
+		{ID: 1, Type: "comment", Parent: 100, By: "someone", Text: huge},
+		{ID: 2, Type: "comment", Parent: 100, By: "someone", Text: "short"},
+	})
+	(&m).setSize(80, 14)
+
+	// Land deep inside the first comment, far from either header.
+	m.vp.SetYOffset(m.lineOf[1] - 60)
+	m, _ = m.handleKey(ctrlPress('d'))
+
+	if m.cursor != 0 {
+		t.Errorf("cursor = %d, want 0: the comment being read", m.cursor)
+	}
 }
 
 func TestDownAfterScrollContinuesFromWhatIsOnScreen(t *testing.T) {
