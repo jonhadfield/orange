@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonhadfield/orange/internal/hn"
@@ -69,16 +69,16 @@ func newHiringModel(client *hn.Client, keys keyMap) hiringModel {
 		client:   client,
 		keys:     keys,
 		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(stylePoints)),
-		vp:       viewport.New(0, 0),
+		vp:       viewport.New(),
 		input:    in,
 		expanded: map[int]bool{},
 	}
 }
 
 func (m *hiringModel) setSize(w, h int) {
-	m.vp.Width = w
-	m.vp.Height = max(1, h-3)
-	m.input.Width = max(10, w-4)
+	m.vp.SetWidth(w)
+	m.vp.SetHeight(max(1, h-3))
+	m.input.SetWidth(max(10, w-4))
 	m.renderContent()
 }
 
@@ -179,16 +179,17 @@ func (m hiringModel) Update(msg tea.Msg) (hiringModel, tea.Cmd) {
 		(&m).renderContent()
 		return m, (&m).nextBatch()
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
 	return m, nil
 }
 
-func (m hiringModel) handleKey(msg tea.KeyMsg) (hiringModel, tea.Cmd) {
+func (m hiringModel) handleKey(msg tea.KeyPressMsg) (hiringModel, tea.Cmd) {
 	if m.filtering {
-		switch msg.Type {
-		case tea.KeyEnter, tea.KeyEsc:
+		// v2 replaces the KeyMsg.Type enum with a key code on the press.
+		switch msg.Code {
+		case tea.KeyEnter, tea.KeyEscape:
 			m.filtering = false
 			m.input.Blur()
 			return m, nil
@@ -234,9 +235,9 @@ func (m hiringModel) handleKey(msg tea.KeyMsg) (hiringModel, tea.Cmd) {
 			(&m).ensureCursorVisible()
 		}
 	case key.Matches(msg, m.keys.ScrollDown):
-		m.vp.SetYOffset(m.vp.YOffset + max(1, m.vp.Height/2))
+		m.vp.SetYOffset(m.vp.YOffset() + max(1, m.vp.Height()/2))
 	case key.Matches(msg, m.keys.ScrollUp):
-		m.vp.SetYOffset(max(0, m.vp.YOffset-max(1, m.vp.Height/2)))
+		m.vp.SetYOffset(max(0, m.vp.YOffset()-max(1, m.vp.Height()/2)))
 	case key.Matches(msg, m.keys.Filter):
 		m.filtering = true
 		m.input.Focus()
@@ -284,15 +285,15 @@ func (m *hiringModel) ensureCursorVisible() {
 	}
 	target := m.lineOf[m.cursor]
 	switch {
-	case target < m.vp.YOffset:
+	case target < m.vp.YOffset():
 		m.vp.SetYOffset(target)
-	case target > m.vp.YOffset+m.vp.Height-3:
-		m.vp.SetYOffset(target - m.vp.Height + 3)
+	case target > m.vp.YOffset()+m.vp.Height()-3:
+		m.vp.SetYOffset(target - m.vp.Height() + 3)
 	}
 }
 
 func (m *hiringModel) renderContent() {
-	if m.vp.Width <= 0 {
+	if m.vp.Width() <= 0 {
 		return
 	}
 	m.lineOf = m.lineOf[:0]
@@ -317,11 +318,11 @@ func (m *hiringModel) renderContent() {
 			titleStyle = styleTitleSel
 		}
 		head := cur + titleStyle.Render(marker+" "+p.headline)
-		b.WriteString(ansi.Truncate(head, m.vp.Width, "…") + "\n")
+		b.WriteString(ansi.Truncate(head, m.vp.Width(), "…") + "\n")
 		line++
 
 		if m.expanded[p.item.ID] {
-			body := lipgloss.NewStyle().Width(max(20, m.vp.Width-4)).Render(p.textLinked)
+			body := lipgloss.NewStyle().Width(max(20, m.vp.Width()-4)).Render(p.textLinked)
 			meta := styleMeta.Render(fmt.Sprintf("— %s · %s · o opens on HN", p.item.By, relAge(p.item.Time, now)))
 			block := prefixLines(body+"\n"+meta, "    ")
 			b.WriteString(block + "\n")
@@ -372,5 +373,5 @@ func (m hiringModel) View() string {
 		footer = styleCollapsed.Render("filter: "+q) + styleMeta.Render("  (/ to edit)")
 	}
 
-	return barWithHints(header, m.vp.Width, viewHiring) + "\n\n" + body + "\n" + footer
+	return barWithHints(header, m.vp.Width(), viewHiring) + "\n\n" + body + "\n" + footer
 }

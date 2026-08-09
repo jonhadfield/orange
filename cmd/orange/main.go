@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/pkg/browser"
 
 	"github.com/jonhadfield/orange/internal/hn"
@@ -39,7 +39,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "orange: watch state unavailable:", err)
 		st = nil
 	}
-	p := tea.NewProgram(ui.New(client, st), tea.WithAltScreen())
+	// The alternate screen is declared by the model's View in Bubble Tea v2,
+	// so it is no longer a program option here.
+	p := tea.NewProgram(ui.New(client, st))
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "orange:", err)
 		os.Exit(1)

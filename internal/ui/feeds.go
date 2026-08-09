@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonhadfield/orange/internal/hn"
@@ -184,13 +184,13 @@ func (m feedsModel) Update(msg tea.Msg) (feedsModel, tea.Cmd) {
 		st.items = append(st.items, msg.items...)
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
 	return m, nil
 }
 
-func (m feedsModel) handleKey(msg tea.KeyMsg) (feedsModel, tea.Cmd) {
+func (m feedsModel) handleKey(msg tea.KeyPressMsg) (feedsModel, tea.Cmd) {
 	st := m.state()
 	switch {
 	case key.Matches(msg, m.keys.Down):
