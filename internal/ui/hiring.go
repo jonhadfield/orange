@@ -207,13 +207,37 @@ func (m hiringModel) handleKey(msg tea.KeyPressMsg) (hiringModel, tea.Cmd) {
 
 	switch {
 	case key.Matches(msg, m.keys.Down):
-		if m.cursor < len(m.visible)-1 {
+		// As in the story view: after free scrolling, carry on from the
+		// post that is on screen rather than snapping back.
+		switch {
+		case m.cursorOffScreen():
+			if next := m.postFrom(m.vp.YOffset()); next >= 0 {
+				m.cursor = next
+				(&m).renderContent()
+				(&m).ensureCursorVisible()
+			} else {
+				m.cursor = len(m.visible) - 1
+				(&m).renderContent()
+				m.vp.ScrollDown(1)
+			}
+		case m.cursor < len(m.visible)-1:
 			m.cursor++
 			(&m).renderContent()
 			(&m).ensureCursorVisible()
 		}
 	case key.Matches(msg, m.keys.Up):
-		if m.cursor > 0 {
+		switch {
+		case m.cursorOffScreen():
+			if prev := m.postUpTo(m.vp.YOffset() + m.vp.Height() - 1); prev >= 0 {
+				m.cursor = prev
+				(&m).renderContent()
+				(&m).ensureCursorVisible()
+			} else {
+				m.cursor = 0
+				(&m).renderContent()
+				m.vp.SetYOffset(0)
+			}
+		case m.cursor > 0:
 			m.cursor--
 			(&m).renderContent()
 			(&m).ensureCursorVisible()
@@ -235,9 +259,12 @@ func (m hiringModel) handleKey(msg tea.KeyPressMsg) (hiringModel, tea.Cmd) {
 			(&m).ensureCursorVisible()
 		}
 	case key.Matches(msg, m.keys.ScrollDown):
+		// The selection follows the scroll, as in the story view.
 		m.vp.SetYOffset(m.vp.YOffset() + max(1, m.vp.Height()/2))
+		(&m).selectTopPost()
 	case key.Matches(msg, m.keys.ScrollUp):
 		m.vp.SetYOffset(max(0, m.vp.YOffset()-max(1, m.vp.Height()/2)))
+		(&m).selectTopPost()
 	case key.Matches(msg, m.keys.Filter):
 		m.filtering = true
 		m.input.Focus()
@@ -277,6 +304,66 @@ func (m *hiringModel) recompute() {
 	if m.cursor >= len(m.visible) {
 		m.cursor = max(0, len(m.visible)-1)
 	}
+}
+
+// cursorOffScreen reports whether the selected post has been scrolled out of
+// view, which is what free scrolling does.
+func (m *hiringModel) cursorOffScreen() bool {
+	if m.cursor >= len(m.lineOf) {
+		return false
+	}
+	line := m.lineOf[m.cursor]
+	return line < m.vp.YOffset() || line >= m.vp.YOffset()+m.vp.Height()
+}
+
+// postFrom returns the first post starting at or below the given content
+// line, or -1 when every post starts above it.
+func (m *hiringModel) postFrom(line int) int {
+	for i, l := range m.lineOf {
+		if l >= line {
+			return i
+		}
+	}
+	return -1
+}
+
+// postInView returns the first post whose header is on screen, or -1 when
+// none is.
+func (m *hiringModel) postInView() int {
+	top, bottom := m.vp.YOffset(), m.vp.YOffset()+m.vp.Height()
+	for i, l := range m.lineOf {
+		if l >= top {
+			if l < bottom {
+				return i
+			}
+			break // sorted, so nothing later is in view either
+		}
+	}
+	return -1
+}
+
+// selectTopPost highlights the post at the top of the viewport, leaving the
+// viewport where the reader scrolled it.
+func (m *hiringModel) selectTopPost() {
+	i := m.postInView()
+	if i < 0 {
+		i = m.postUpTo(m.vp.YOffset())
+	}
+	if i < 0 {
+		i = 0
+	}
+	m.cursor = i
+	m.renderContent()
+}
+
+// postUpTo is postFrom from the other end, for moving up.
+func (m *hiringModel) postUpTo(line int) int {
+	for i := len(m.lineOf) - 1; i >= 0; i-- {
+		if m.lineOf[i] <= line {
+			return i
+		}
+	}
+	return -1
 }
 
 func (m *hiringModel) ensureCursorVisible() {

@@ -254,19 +254,45 @@ func (m storyModel) Update(msg tea.Msg) (storyModel, tea.Cmd) {
 func (m storyModel) handleKey(msg tea.KeyPressMsg) (storyModel, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Down):
-		if m.cursor < len(m.nodes)-1 {
+		switch {
+		case m.cursorOffScreen():
+			// Free scrolling moved the view and left the selection behind,
+			// so continue from what is on screen instead of snapping back.
+			if next := m.nodeFrom(m.vp.YOffset()); next >= 0 {
+				m.cursor = next
+				(&m).renderContent()
+				(&m).ensureCursorVisible()
+			} else {
+				// Scrolled past every comment: take the last one without
+				// dragging the view back to it, and keep scrolling.
+				m.cursor = len(m.nodes) - 1
+				(&m).renderContent()
+				m.vp.ScrollDown(1)
+			}
+		case m.cursor < len(m.nodes)-1:
 			m.cursor++
 			(&m).renderContent()
 			(&m).ensureCursorVisible()
-		} else {
+		default:
 			m.vp.ScrollDown(1)
 		}
 	case key.Matches(msg, m.keys.Up):
-		if m.cursor > 0 {
+		switch {
+		case m.cursorOffScreen():
+			if prev := m.nodeUpTo(m.vp.YOffset() + m.vp.Height() - 1); prev >= 0 {
+				m.cursor = prev
+				(&m).renderContent()
+				(&m).ensureCursorVisible()
+			} else {
+				m.cursor = 0
+				(&m).renderContent()
+				m.vp.SetYOffset(0)
+			}
+		case m.cursor > 0:
 			m.cursor--
 			(&m).renderContent()
 			(&m).ensureCursorVisible()
-		} else {
+		default:
 			m.vp.SetYOffset(0) // reveal the story header
 		}
 	case key.Matches(msg, m.keys.Top):
@@ -280,11 +306,13 @@ func (m storyModel) handleKey(msg tea.KeyPressMsg) (storyModel, tea.Cmd) {
 			(&m).ensureCursorVisible()
 		}
 	case key.Matches(msg, m.keys.ScrollDown):
-		// Free scrolling for comments taller than the screen; the
-		// selection stays where it is.
+		// Free scrolling for comments taller than the screen. The
+		// selection follows, so the comment being read stays highlighted.
 		m.vp.SetYOffset(m.vp.YOffset() + max(1, m.vp.Height()/2))
+		(&m).selectTopComment()
 	case key.Matches(msg, m.keys.ScrollUp):
 		m.vp.SetYOffset(max(0, m.vp.YOffset()-max(1, m.vp.Height()/2)))
+		(&m).selectTopComment()
 	case key.Matches(msg, m.keys.Refresh):
 		// Reload via the app so the story item itself is refetched.
 		if id := m.story.ID; id != 0 && !m.loading {
@@ -307,6 +335,72 @@ func (m storyModel) handleKey(msg tea.KeyPressMsg) (storyModel, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// cursorOffScreen reports whether the selected comment has been scrolled out
+// of view. That is exactly what free scrolling does: it moves the viewport
+// and deliberately leaves the selection where it was.
+func (m *storyModel) cursorOffScreen() bool {
+	if m.cursor >= len(m.lineOf) {
+		return false
+	}
+	line := m.lineOf[m.cursor]
+	return line < m.vp.YOffset() || line >= m.vp.YOffset()+m.vp.Height()
+}
+
+// nodeFrom returns the first comment starting at or below the given content
+// line, or -1 when every comment starts above it. Reading down, that is the
+// next comment the reader can see, whether it is already on screen or just
+// below the fold of a long comment they are part-way through.
+func (m *storyModel) nodeFrom(line int) int {
+	for i, l := range m.lineOf {
+		if l >= line {
+			return i
+		}
+	}
+	return -1
+}
+
+// nodeInView returns the first comment whose header is on screen, or -1 when
+// none is — which happens inside a comment taller than the whole viewport.
+func (m *storyModel) nodeInView() int {
+	top, bottom := m.vp.YOffset(), m.vp.YOffset()+m.vp.Height()
+	for i, l := range m.lineOf {
+		if l >= top {
+			if l < bottom {
+				return i
+			}
+			break // sorted, so nothing later is in view either
+		}
+	}
+	return -1
+}
+
+// selectTopComment highlights the comment at the top of the viewport: the
+// first whose header is on screen, or, when the reader is part-way through
+// one taller than the screen, the comment they are inside. The viewport is
+// left exactly where the reader scrolled it.
+func (m *storyModel) selectTopComment() {
+	i := m.nodeInView()
+	if i < 0 {
+		i = m.nodeUpTo(m.vp.YOffset())
+	}
+	if i < 0 {
+		i = 0
+	}
+	m.cursor = i
+	m.renderContent()
+}
+
+// nodeUpTo is nodeFrom from the other end: the last comment starting at or
+// above the given line, or -1 when every comment starts below it.
+func (m *storyModel) nodeUpTo(line int) int {
+	for i := len(m.lineOf) - 1; i >= 0; i-- {
+		if m.lineOf[i] <= line {
+			return i
+		}
+	}
+	return -1
 }
 
 func (m *storyModel) ensureCursorVisible() {
