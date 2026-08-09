@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -17,9 +18,21 @@ import (
 	"github.com/jonhadfield/orange/internal/htmltext"
 )
 
-const commentBatchSize = 24
+const (
+	commentBatchSize = 24
+	// Batches run concurrently so the Firebase reconciliation pass finishes
+	// quickly in the background, rather than one round trip at a time.
+	maxInFlightBatches = 3
+)
 
 type commentsMsg struct {
+	storyID int
+	items   []hn.Item
+	err     error
+}
+
+// treeMsg carries the whole comment tree fetched from Algolia in one request.
+type treeMsg struct {
 	storyID int
 	items   []hn.Item
 	err     error
@@ -41,10 +54,13 @@ type storyModel struct {
 
 	story    hn.Item
 	tree     *commentTree
-	queue    []int // comment IDs waiting to be fetched
+	queue    []int        // comment IDs waiting to be fetched
+	queued   map[int]bool // every ID ever queued, so nothing is fetched twice
+	inflight int          // batches currently in flight
 	past     []hn.PastDiscussion
 	newSince int64 // comments after this time are marked new (0 = off)
 	loading  bool
+	warn     string // non-fatal loading problem, shown alongside the count
 	err      error
 
 	nodes  []*commentNode // currently visible nodes, in render order
@@ -76,15 +92,32 @@ func (m *storyModel) setSize(w, h int) {
 func (m storyModel) open(it hn.Item, newSince int64) (storyModel, tea.Cmd) {
 	m.story = it
 	m.tree = newCommentTree(it.ID)
-	m.queue = append([]int(nil), it.Kids...)
+	m.queue = nil
+	m.queued = make(map[int]bool)
+	m.inflight = 0
 	m.past = nil
 	m.newSince = newSince
 	m.cursor = 0
+	m.warn = ""
 	m.err = nil
+	m.loading = true
 	m.vp.SetYOffset(0)
 	(&m).renderContent()
-	cmd := (&m).nextBatch()
-	return m, tea.Batch(cmd, m.fetchPast(), m.spinner.Tick)
+	return m, tea.Batch((&m).fetchTree(), m.fetchPast(), m.spinner.Tick)
+}
+
+// fetchTree pulls the entire comment tree from Algolia in a single request.
+// It is a fast path, not a complete one — Algolia drops removed comments and
+// their replies and trails the live site — so the Firebase pass still runs
+// behind it to fill the gaps.
+func (m *storyModel) fetchTree() tea.Cmd {
+	client, id := m.client, m.story.ID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+		defer cancel()
+		items, err := client.ItemTree(ctx, id)
+		return treeMsg{storyID: id, items: items, err: err}
+	}
 }
 
 // fetchPast looks up earlier submissions of the same URL. Failures are
@@ -105,16 +138,45 @@ func (m *storyModel) fetchPast() tea.Cmd {
 	}
 }
 
+// enqueue adds comment IDs to the fetch queue, skipping any already queued.
+func (m *storyModel) enqueue(ids []int) {
+	for _, id := range ids {
+		if m.queued[id] {
+			continue
+		}
+		m.queued[id] = true
+		m.queue = append(m.queue, id)
+	}
+}
+
+// fillBatches starts fetches until the in-flight limit is reached, and clears
+// the loading flag once nothing is left to do.
+func (m *storyModel) fillBatches() tea.Cmd {
+	var cmds []tea.Cmd
+	for m.inflight < maxInFlightBatches {
+		cmd := m.nextBatch()
+		if cmd == nil {
+			break
+		}
+		cmds = append(cmds, cmd)
+	}
+	m.loading = m.inflight > 0
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
+}
+
 // nextBatch takes the next slice of queued comment IDs and fetches them.
 func (m *storyModel) nextBatch() tea.Cmd {
 	if len(m.queue) == 0 {
-		m.loading = false
 		return nil
 	}
 	n := min(commentBatchSize, len(m.queue))
 	ids := append([]int(nil), m.queue[:n]...)
 	m.queue = m.queue[n:]
 	m.loading = true
+	m.inflight++
 	client, storyID := m.client, m.story.ID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
@@ -142,22 +204,46 @@ func (m storyModel) Update(msg tea.Msg) (storyModel, tea.Cmd) {
 		(&m).renderContent()
 		return m, nil
 
+	case treeMsg:
+		if m.tree == nil || msg.storyID != m.story.ID {
+			return m, nil
+		}
+		if msg.err == nil {
+			m.tree.add(msg.items)
+			(&m).renderContent()
+			(&m).ensureCursorVisible()
+		}
+		// Reconcile against Firebase either way: it recovers the comments
+		// Algolia omits, and is the only source if the fast path failed.
+		(&m).enqueue(m.story.Kids)
+		return m, (&m).fillBatches()
+
 	case commentsMsg:
 		if m.tree == nil || msg.storyID != m.story.ID {
 			return m, nil
 		}
-		m.loading = false
+		m.inflight--
 		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
+			var partial *hn.PartialError
+			if errors.As(msg.err, &partial) {
+				m.warn = fmt.Sprintf("%d of %d comments failed to load",
+					partial.Requested-partial.Fetched, partial.Requested)
+			} else {
+				// Surface the failure but keep whatever else is still
+				// arriving, rather than discarding the whole thread.
+				m.err = msg.err
+			}
 		}
-		added := m.tree.add(msg.items)
-		for _, it := range added {
-			m.queue = append(m.queue, it.Kids...)
+		m.tree.add(msg.items)
+		// Walk from every fetched comment, not just the newly added ones:
+		// a comment already supplied by Algolia can still have replies that
+		// Algolia dropped.
+		for _, it := range msg.items {
+			(&m).enqueue(it.Kids)
 		}
 		(&m).renderContent()
 		(&m).ensureCursorVisible()
-		return m, (&m).nextBatch()
+		return m, (&m).fillBatches()
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -316,9 +402,20 @@ func (m *storyModel) renderNode(n *commentNode, selected bool, now time.Time) st
 	if selected {
 		metaStyle = styleMetaSel
 	}
-	meta := metaStyle.Render(fmt.Sprintf("%s %s · %s", arrow, n.item.By, relAge(n.item.Time, now)))
-	if m.newSince > 0 && n.item.Time > m.newSince {
-		meta += styleRise.Render(" ● new")
+
+	var meta string
+	if n.placeholder {
+		// Kept only to hold its replies, so it shows a marker and no body.
+		label := "[dead]"
+		if n.item.Deleted {
+			label = "[deleted]"
+		}
+		meta = metaStyle.Render(arrow + " " + label)
+	} else {
+		meta = metaStyle.Render(fmt.Sprintf("%s %s · %s", arrow, n.item.By, relAge(n.item.Time, now)))
+		if m.newSince > 0 && n.item.Time > m.newSince {
+			meta += styleRise.Render(" ● new")
+		}
 	}
 	if n.collapsed {
 		if hidden := subtreeSize(n); hidden > 0 {
@@ -327,10 +424,9 @@ func (m *storyModel) renderNode(n *commentNode, selected bool, now time.Time) st
 	}
 
 	block := meta
-	if !n.collapsed {
+	if !n.collapsed && !n.placeholder {
 		wrapWidth := max(20, m.vp.Width-indentWidth-1)
-		text := htmltext.ConvertLinked(n.item.Text)
-		block += "\n" + lipgloss.NewStyle().Width(wrapWidth).Render(text)
+		block += "\n" + lipgloss.NewStyle().Width(wrapWidth).Render(n.text)
 	}
 
 	return prefixLines(block, guide) + "\n\n"
@@ -362,6 +458,9 @@ func (m storyModel) View() string {
 			count = m.tree.count
 		}
 		status = styleMeta.Render(pluralize(count, "comment") + " loaded")
+		if m.warn != "" {
+			status += styleError.Render("  ⚠ " + m.warn)
+		}
 	}
 	return m.vp.View() + "\n" + status
 }
