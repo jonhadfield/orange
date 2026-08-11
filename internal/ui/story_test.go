@@ -155,6 +155,60 @@ func TestScrollingInsideAHugeCommentKeepsItSelected(t *testing.T) {
 	}
 }
 
+func wheel(b tea.MouseButton) tea.MouseWheelMsg {
+	return tea.MouseWheelMsg{Button: b, X: 10, Y: 10}
+}
+
+func TestWheelScrollsAndMovesTheSelection(t *testing.T) {
+	m := newScrollTestModel(t, 60)
+	if m.cursor != 0 {
+		t.Fatalf("cursor starts at %d, want 0", m.cursor)
+	}
+
+	// Enough notches to carry the view past the first comment.
+	for range 5 {
+		var mm storyModel
+		mm, _ = m.Update(wheel(tea.MouseWheelDown))
+		m = mm
+	}
+
+	if m.vp.YOffset() == 0 {
+		t.Fatal("wheel down did not scroll the view")
+	}
+	if m.cursor == 0 {
+		t.Error("wheel down scrolled but left the selection on the first comment")
+	}
+	if !headerVisible(m) {
+		t.Errorf("selected comment %d starts at line %d, outside the view [%d,%d)",
+			m.cursor, m.lineOf[m.cursor], m.vp.YOffset(), m.vp.YOffset()+m.vp.Height())
+	}
+
+	down, downOffset := m.cursor, m.vp.YOffset()
+	for range 5 {
+		var mm storyModel
+		mm, _ = m.Update(wheel(tea.MouseWheelUp))
+		m = mm
+	}
+	if m.vp.YOffset() >= downOffset {
+		t.Errorf("Y offset = %d after wheeling up, want less than %d", m.vp.YOffset(), downOffset)
+	}
+	if m.cursor >= down {
+		t.Errorf("cursor = %d after wheeling up, want less than %d", m.cursor, down)
+	}
+}
+
+func TestWheelUpStopsAtTheTop(t *testing.T) {
+	m := newScrollTestModel(t, 20)
+	for range 10 {
+		var mm storyModel
+		mm, _ = m.Update(wheel(tea.MouseWheelUp))
+		m = mm
+	}
+	if got := m.vp.YOffset(); got != 0 {
+		t.Errorf("Y offset = %d at the top, want 0", got)
+	}
+}
+
 func TestDownAfterScrollContinuesFromWhatIsOnScreen(t *testing.T) {
 	m := newScrollTestModel(t, 60)
 	if m.cursor != 0 {

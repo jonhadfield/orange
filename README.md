@@ -80,7 +80,8 @@ orange
 | ------------------- | --------------------------------------------- |
 | `j` / `k`, `↓` / `↑`| Move selection / scroll                       |
 | `g` / `G`           | Jump to top / bottom                          |
-| `ctrl+d` / `ctrl+u` | Scroll half a page without moving selection   |
+| `ctrl+d` / `ctrl+u` | Scroll half a page; the selection follows      |
+| Mouse wheel / trackpad | Scroll; the selection follows              |
 | `tab` / `shift+tab` | Next / previous feed                          |
 | `1`–`6`             | Jump straight to a feed                       |
 | `enter` / `l`       | Open story; in a thread, fold/unfold comment  |

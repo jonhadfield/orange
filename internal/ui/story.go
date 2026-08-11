@@ -18,6 +18,9 @@ import (
 	"github.com/jonhadfield/orange/internal/htmltext"
 )
 
+// wheelLines is how far one wheel or trackpad notch scrolls a text view.
+const wheelLines = 3
+
 const (
 	commentBatchSize = 24
 	// Batches run concurrently so the Firebase reconciliation pass finishes
@@ -244,6 +247,19 @@ func (m storyModel) Update(msg tea.Msg) (storyModel, tea.Cmd) {
 		(&m).renderContent()
 		(&m).ensureCursorVisible()
 		return m, (&m).fillBatches()
+
+	case tea.MouseWheelMsg:
+		// The wheel scrolls the view and the selection follows it, exactly
+		// as ctrl+d and ctrl+u do.
+		switch msg.Button {
+		case tea.MouseWheelDown:
+			m.vp.SetYOffset(m.vp.YOffset() + wheelLines)
+			(&m).selectTopComment()
+		case tea.MouseWheelUp:
+			m.vp.SetYOffset(max(0, m.vp.YOffset()-wheelLines))
+			(&m).selectTopComment()
+		}
+		return m, nil
 
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)

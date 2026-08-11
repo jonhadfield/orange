@@ -342,6 +342,10 @@ func (m Model) View() tea.View {
 	// program option, so it is declared on every frame.
 	v := tea.NewView("")
 	v.AltScreen = true
+	// Report mouse events so the wheel and trackpad scroll the view. The
+	// cost is that the terminal no longer handles click-drag selection
+	// itself; most terminals still allow it while holding alt or shift.
+	v.MouseMode = tea.MouseModeCellMotion
 	if m.width == 0 {
 		return v
 	}
