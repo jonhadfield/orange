@@ -37,7 +37,11 @@ changelog:
   sort: asc
 
 homebrew_casks:
-  - name: orange
+  # The cask token is orange-cli because homebrew-cask already owns the
+  # `orange` token (Orange Data Mining, a GUI app). The installed command
+  # stays `orange` — that name is uncontested, as their cask ships no binary.
+  - name: orange-cli
+    binaries: [orange]
     repository:
       owner: jonhadfield
       name: homebrew-tap
