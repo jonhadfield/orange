@@ -48,13 +48,19 @@ And the fundamentals:
 With [Homebrew](https://brew.sh):
 
 ```sh
-brew install jonhadfield/tap/orange
+brew install jonhadfield/tap/orange-cli
 ```
 
-Always use the fully-qualified name: an unrelated Homebrew package
-(Orange Data Mining) shares the `orange` token, so a bare
-`brew install orange` or `brew upgrade orange` installs that instead.
-Upgrade with `brew upgrade jonhadfield/tap/orange`.
+The cask is `orange-cli` because an unrelated Homebrew package (Orange
+Data Mining) owns the `orange` token. The installed command is still
+`orange`.
+
+If you installed an earlier version under the old token, switch over with:
+
+```sh
+brew uninstall --cask jonhadfield/tap/orange
+brew install jonhadfield/tap/orange-cli
+```
 
 Or with Go 1.26 or later:
 
