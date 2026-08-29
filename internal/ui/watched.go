@@ -168,11 +168,13 @@ func (m watchedModel) Update(msg tea.Msg) (watchedModel, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.Watch):
 			if row, ok := m.selected(); ok && m.st != nil {
-				_, _ = m.st.Toggle(row.item.ID, row.item.Title, row.item.Descendants, time.Now().Unix())
+				m.st.Toggle(row.item.ID, row.item.Title, row.item.Descendants, time.Now().Unix())
 				m.rows = append(m.rows[:m.cursor], m.rows[m.cursor+1:]...)
 				if m.cursor >= len(m.rows) {
 					m.cursor = max(0, len(m.rows)-1)
 				}
+				// The row goes now; the file catches up off the loop.
+				return m, saveStore(m.st)
 			}
 		}
 	}

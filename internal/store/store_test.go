@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -14,12 +15,15 @@ func TestToggleAndPersist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	watching, err := s.Toggle(42, "A story", 10, 1000)
-	if err != nil || !watching {
-		t.Fatalf("Toggle on = (%v, %v), want (true, nil)", watching, err)
+	if watching := s.Toggle(42, "A story", 10, 1000); !watching {
+		t.Fatal("Toggle on = false, want true")
 	}
 	if !s.IsWatched(42) {
 		t.Error("IsWatched(42) = false after watching")
+	}
+	// The change is in memory until Save; persisting is now a separate step.
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
 	}
 
 	// Reopen from disk: state must survive.
@@ -32,9 +36,8 @@ func TestToggleAndPersist(t *testing.T) {
 		t.Errorf("persisted state = %+v, %v", ws, ok)
 	}
 
-	watching, err = s2.Toggle(42, "A story", 10, 2000)
-	if err != nil || watching {
-		t.Fatalf("Toggle off = (%v, %v), want (false, nil)", watching, err)
+	if watching := s2.Toggle(42, "A story", 10, 2000); watching {
+		t.Fatal("Toggle off = true, want false")
 	}
 	if s2.IsWatched(42) {
 		t.Error("IsWatched(42) = true after unwatching")
@@ -49,19 +52,13 @@ func TestMarkRead(t *testing.T) {
 	}
 
 	// No-op for unwatched stories.
-	if err := s.MarkRead(1, 5, 100); err != nil {
-		t.Fatalf("MarkRead unwatched: %v", err)
-	}
+	s.MarkRead(1, 5, 100)
 	if _, ok := s.Get(1); ok {
 		t.Error("MarkRead created state for an unwatched story")
 	}
 
-	if _, err := s.Toggle(1, "t", 5, 100); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.MarkRead(1, 25, 200); err != nil {
-		t.Fatalf("MarkRead: %v", err)
-	}
+	s.Toggle(1, "t", 5, 100)
+	s.MarkRead(1, 25, 200)
 	ws, _ := s.Get(1)
 	if ws.LastComments != 25 || ws.LastReadAt != 200 {
 		t.Errorf("after MarkRead = %+v, want comments 25, readAt 200", ws)
@@ -92,8 +89,9 @@ func TestSaveIsAtomicAndLeavesNoTempFiles(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	for i := range 5 {
-		if _, err := s.Toggle(i, "story", 0, int64(i)); err != nil {
-			t.Fatalf("Toggle: %v", err)
+		s.Toggle(i, "story", 0, int64(i))
+		if err := s.Save(); err != nil {
+			t.Fatalf("Save: %v", err)
 		}
 	}
 
@@ -133,8 +131,9 @@ func TestSaveReplacesExistingFileInPlace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if _, err := s.Toggle(7, "", 0, 0); err != nil { // removes it
-		t.Fatalf("Toggle: %v", err)
+	s.Toggle(7, "", 0, 0) // removes it
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
 	}
 
 	s2, err := Open(path)
@@ -204,8 +203,9 @@ func TestWatchingWorksAfterRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if _, err := s.Toggle(7, "A story", 3, 100); err != nil {
-		t.Fatalf("Toggle after recovery: %v", err)
+	s.Toggle(7, "A story", 3, 100)
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save after recovery: %v", err)
 	}
 
 	s2, err := Open(path)
@@ -288,5 +288,141 @@ func TestDefaultPath(t *testing.T) {
 	}
 	if !filepath.IsAbs(p) {
 		t.Errorf("DefaultPath() = %q, want an absolute path", p)
+	}
+}
+
+// TestMutationsDoNotTouchTheDisk is the point of splitting Save out: a
+// keypress changes the list in memory, and the write happens elsewhere.
+func TestMutationsDoNotTouchTheDisk(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "watched.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	s.Toggle(1, "a story", 3, 100)
+	s.MarkRead(1, 9, 200)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(%q) = %v, want no file until Save", path, err)
+	}
+	if !s.IsWatched(1) {
+		t.Error("the change is not visible in memory either")
+	}
+
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("after Save: %v, want the file written", err)
+	}
+}
+
+// TestSaveIsANoOpWhenNothingChanged: Save runs after every mutation and on
+// the way out, so a clean one must not rewrite the file.
+func TestSaveIsANoOpWhenNothingChanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "watched.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save on a clean store: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("a clean Save created %q", path)
+	}
+
+	s.Toggle(1, "t", 0, 1)
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A second Save with nothing new must leave the file alone.
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(again.ModTime()) || info.Size() != again.Size() {
+		t.Error("a clean Save rewrote the file")
+	}
+}
+
+// TestFailedSaveStaysDirty: a write that does not land must be tried again,
+// or a change would be silently dropped by the flush on the way out.
+func TestFailedSaveStaysDirty(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	path := filepath.Join(sub, "watched.json")
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	s.Toggle(1, "t", 0, 1)
+
+	// A file where the directory needs to be, so MkdirAll cannot succeed.
+	if err := os.WriteFile(sub, []byte("in the way"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(); err == nil {
+		t.Fatal("Save into a blocked path returned no error")
+	}
+
+	// Still dirty, so the retry writes rather than no-opping.
+	if err := os.Remove(sub); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(); err != nil {
+		t.Fatalf("retry after a failed Save: %v", err)
+	}
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if !s2.IsWatched(1) {
+		t.Error("the change was lost after a failed Save and a retry")
+	}
+}
+
+// TestConcurrentSaves runs under -race in CI. Saves now happen off the
+// update loop, so several can be in flight at once, and the file has to end
+// up holding the final state rather than a half-written or stale one.
+func TestConcurrentSaves(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "watched.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	for i := range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.Toggle(i, "story", 0, int64(i))
+			if err := s.Save(); err != nil {
+				t.Errorf("Save: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// One last Save settles whatever the racing ones left unwritten.
+	if err := s.Save(); err != nil {
+		t.Fatalf("final Save: %v", err)
+	}
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if got := len(s2.All()); got != 20 {
+		t.Errorf("reopened store has %d entries, want 20", got)
 	}
 }

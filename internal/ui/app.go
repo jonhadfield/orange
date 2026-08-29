@@ -128,6 +128,12 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case storeErrMsg:
+		// The watch list is right in memory but did not reach the disk, so
+		// say so rather than letting it look as though it was saved.
+		m.notice = "watch list not saved: " + msg.err.Error()
+		return m, nil
+
 	case openItemMsg:
 		client, id := m.client, msg.id
 		return m, func() tea.Msg {
@@ -209,6 +215,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	m.notice = ""
 	switch {
 	case key.Matches(msg, m.keys.Quit):
+		// The only synchronous write left. Every other Save runs off the
+		// update loop, so a change made just before quitting may still be
+		// in memory, and there is no later frame to do it on.
+		if m.st != nil {
+			_ = m.st.Save()
+		}
 		return m, tea.Quit
 
 	case key.Matches(msg, m.keys.Help):
@@ -301,18 +313,18 @@ func (m Model) openStory(it hn.Item, from view) (Model, tea.Cmd) {
 		m.prevView = from
 	}
 	m.view = viewStory
+	var save tea.Cmd
 	var newSince int64
 	if m.st != nil {
 		if ws, ok := m.st.Get(it.ID); ok {
 			newSince = ws.LastReadAt
-			if err := m.st.MarkRead(it.ID, it.Descendants, time.Now().Unix()); err != nil {
-				m.notice = "state: " + err.Error()
-			}
+			m.st.MarkRead(it.ID, it.Descendants, time.Now().Unix())
+			save = saveStore(m.st)
 		}
 	}
 	var cmd tea.Cmd
 	m.story, cmd = m.story.open(it, newSince)
-	return m, cmd
+	return m, tea.Batch(cmd, save)
 }
 
 func (m Model) toggleWatch() (Model, tea.Cmd) {
@@ -324,16 +336,34 @@ func (m Model) toggleWatch() (Model, tea.Cmd) {
 		m.notice = storeUnavailable("watching")
 		return m, nil
 	}
-	watching, err := m.st.Toggle(it.ID, it.Title, it.Descendants, time.Now().Unix())
-	switch {
-	case err != nil:
-		m.notice = "state: " + err.Error()
-	case watching:
+	// The list changes now and is written afterwards, so the keypress is
+	// answered at once. A write that then fails replaces this notice.
+	if m.st.Toggle(it.ID, it.Title, it.Descendants, time.Now().Unix()) {
 		m.notice = "watching: " + it.Title
-	default:
+	} else {
 		m.notice = "stopped watching: " + it.Title
 	}
-	return m, nil
+	return m, saveStore(m.st)
+}
+
+// storeErrMsg carries a failed write back to the update loop, since the
+// write no longer happens where the keypress is handled.
+type storeErrMsg struct{ err error }
+
+// saveStore writes the watch list off the update loop. Bubble Tea runs
+// Update on one goroutine, and the write is an atomic rewrite with an fsync
+// in it: on a network home directory or an encrypted volume, doing that in
+// the input path is a visible stall.
+func saveStore(st *store.Store) tea.Cmd {
+	if st == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		if err := st.Save(); err != nil {
+			return storeErrMsg{err}
+		}
+		return nil
+	}
 }
 
 // current is the item that o/c/w act on in the active view.
