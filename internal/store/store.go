@@ -22,12 +22,17 @@ type WatchState struct {
 // Store is a JSON-file-backed watch list, safe for concurrent use.
 type Store struct {
 	path string
+	// held for the whole of Save, so two writes cannot overlap and an
+	// older snapshot cannot land on top of a newer one
+	writeMu sync.Mutex
 	// where an unparseable file was moved to at Open, empty if there was
 	// nothing wrong with it
 	corrupt string
 
 	mu      sync.Mutex
 	watched map[int]WatchState
+	// set by a mutation, cleared by a Save that reached the disk
+	dirty bool
 }
 
 // DefaultPath is where the watch list lives when Open is given no path.
@@ -93,15 +98,47 @@ func (s *Store) Recovered() (movedTo string, ok bool) {
 	return s.corrupt, s.corrupt != ""
 }
 
-// save rewrites the store atomically: a crash or a full disk mid-write leaves
-// the previous watch list intact rather than a truncated file.
-func (s *Store) save() error {
-	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+// Save writes the watch list if anything has changed since the last one, and
+// is a no-op otherwise. It is safe to call from any goroutine, and meant to
+// be called off the update loop: the write is an atomic rewrite with an
+// fsync in it, which is far too slow to sit in the path of a keystroke.
+func (s *Store) Save() error {
+	// One write at a time. Holding this for the whole of Save means the
+	// snapshot below is taken after any earlier write has finished, so a
+	// slower earlier write cannot land on top of a newer one.
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	// The lock is held just long enough to copy the state out, never across
+	// the file I/O, so a keypress arriving mid-write does not wait for it.
+	s.mu.Lock()
+	if !s.dirty {
+		s.mu.Unlock()
+		return nil
 	}
 	b, err := json.MarshalIndent(s.watched, "", "  ")
+	s.dirty = false
+	s.mu.Unlock()
 	if err != nil {
+		return err
+	}
+
+	if err := s.write(b); err != nil {
+		// Still unsaved, so a later Save — the one on the way out, if
+		// nothing else — tries again.
+		s.mu.Lock()
+		s.dirty = true
+		s.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+// write rewrites the store atomically: a crash or a full disk mid-write
+// leaves the previous watch list intact rather than a truncated file.
+func (s *Store) write(b []byte) error {
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	// The temp file must share a filesystem with the target for the rename
@@ -147,31 +184,34 @@ func (s *Store) Get(id int) (WatchState, bool) {
 }
 
 // Toggle adds the story to the watch list, or removes it if present, and
-// reports whether it is now watched.
-func (s *Store) Toggle(id int, title string, comments int, now int64) (bool, error) {
+// reports whether it is now watched. The change is in memory only; Save
+// puts it on disk.
+func (s *Store) Toggle(id int, title string, comments int, now int64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.dirty = true
 	if _, ok := s.watched[id]; ok {
 		delete(s.watched, id)
-		return false, s.save()
+		return false
 	}
 	s.watched[id] = WatchState{ID: id, Title: title, LastReadAt: now, LastComments: comments}
-	return true, s.save()
+	return true
 }
 
 // MarkRead records that the story's discussion has been read up to now,
-// with the given comment count. It is a no-op for unwatched stories.
-func (s *Store) MarkRead(id int, comments int, now int64) error {
+// with the given comment count. It is a no-op for unwatched stories. As
+// with Toggle, the change is in memory only until Save.
+func (s *Store) MarkRead(id int, comments int, now int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ws, ok := s.watched[id]
 	if !ok {
-		return nil
+		return
 	}
 	ws.LastReadAt = now
 	ws.LastComments = comments
 	s.watched[id] = ws
-	return s.save()
+	s.dirty = true
 }
 
 // All returns the watch list, most recently read first.

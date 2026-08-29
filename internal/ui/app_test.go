@@ -185,3 +185,80 @@ func TestStoreUnavailableNamesTheFile(t *testing.T) {
 		t.Errorf("storeUnavailable(%q) = %q, want it to start with the subject", "watching", got)
 	}
 }
+
+// TestQuitFlushesTheWatchList: every other Save runs off the update loop, so
+// a change made just before quitting has no later frame to be written on.
+// Quit is the one place the write has to be synchronous.
+func TestQuitFlushesTheWatchList(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "watched.json")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	st.Toggle(1, "a story", 3, 100)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("the mutation reached the disk on its own: %v", err)
+	}
+
+	m := New(hn.NewClient("http://unused.invalid"), st)
+	if _, cmd := m.Update(keyPress("q")); cmd == nil {
+		t.Fatal("q produced no command, so it is not quitting")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("quitting left the watch list unwritten: %v", err)
+	}
+
+	reopened, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if !reopened.IsWatched(1) {
+		t.Error("the story watched just before quitting was not saved")
+	}
+}
+
+// TestSaveStoreReportsFailure: the write no longer happens where the
+// keypress is handled, so a failure has to travel back as a message rather
+// than being returned.
+func TestSaveStoreReportsFailure(t *testing.T) {
+	if cmd := saveStore(nil); cmd != nil {
+		t.Error("saveStore(nil) returned a command")
+	}
+
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	st, err := store.Open(filepath.Join(sub, "watched.json"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	st.Toggle(1, "t", 0, 1)
+	// A file where the directory needs to be, so the write cannot succeed.
+	if err := os.WriteFile(sub, []byte("in the way"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	msg := saveStore(st)()
+	failure, ok := msg.(storeErrMsg)
+	if !ok {
+		t.Fatalf("saveStore returned %T, want storeErrMsg", msg)
+	}
+
+	// And the reader says so, rather than leaving it looking saved.
+	m := newTestModel(t)
+	next, _ := m.Update(failure)
+	if notice := next.(Model).notice; !strings.Contains(notice, "not saved") {
+		t.Errorf("notice = %q, want it to say the list was not saved", notice)
+	}
+}
+
+// TestSuccessfulSaveSaysNothing: a write that worked is not news.
+func TestSuccessfulSaveSaysNothing(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "watched.json"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	st.Toggle(1, "t", 0, 1)
+	if msg := saveStore(st)(); msg != nil {
+		t.Errorf("a successful save produced %#v, want nil", msg)
+	}
+}
