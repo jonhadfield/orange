@@ -15,6 +15,10 @@ import (
 	"github.com/jonhadfield/orange/internal/store"
 )
 
+// watchedBadgeWidth is the width of the "+12 new" / "no new" column, which
+// the meta line underneath is indented to clear.
+const watchedBadgeWidth = 10
+
 type watchedRow struct {
 	item     hn.Item
 	state    store.WatchState
@@ -76,6 +80,12 @@ func (m watchedModel) start() (watchedModel, tea.Cmd) {
 		items, err := client.ItemsFresh(ctx, ids)
 		return watchedDataMsg{items: items, err: err}
 	})
+}
+
+// visibleRows is how many stories fit below the header; as in the feed
+// list, the last row's trailing blank falls off the bottom.
+func (m watchedModel) visibleRows() int {
+	return max(1, (m.height-tabBarHeight+1)/rowHeight)
 }
 
 func (m watchedModel) selected() (watchedRow, bool) {
@@ -147,6 +157,10 @@ func (m watchedModel) Update(msg tea.Msg) (watchedModel, tea.Cmd) {
 			if len(m.rows) > 0 {
 				m.cursor = len(m.rows) - 1
 			}
+		case key.Matches(msg, m.keys.ScrollDown):
+			m.cursor = scrollCursor(m.cursor, len(m.rows), m.visibleRows(), 1)
+		case key.Matches(msg, m.keys.ScrollUp):
+			m.cursor = scrollCursor(m.cursor, len(m.rows), m.visibleRows(), -1)
 		case key.Matches(msg, m.keys.Refresh):
 			if !m.loading {
 				return m.start()
@@ -183,20 +197,21 @@ func (m watchedModel) View() string {
 }
 
 func (m watchedModel) renderRows() string {
-	visible := max(1, (m.height-2)/rowHeight)
+	visible := m.visibleRows()
 	start := 0
 	if m.cursor >= visible {
 		start = m.cursor - visible + 1
 	}
+	indent := strings.Repeat(" ", cursorMarkWidth+watchedBadgeWidth)
 	now := time.Now()
 	var b strings.Builder
 	for i := start; i < min(start+visible, len(m.rows)); i++ {
 		r := m.rows[i]
 		sel := i == m.cursor
 
-		cur := "  "
+		cur := strings.Repeat(" ", cursorMarkWidth)
 		if sel {
-			cur = styleCursorBar.Render("▍ ")
+			cur = styleCursorBar.Render(cursorMark)
 		}
 		badge := styleMeta.Render("  no new  ")
 		if r.newCount > 0 {
@@ -207,7 +222,7 @@ func (m watchedModel) renderRows() string {
 			titleStyle = styleTitleSel
 		}
 		line1 := cur + badge + titleStyle.Render(r.item.Title)
-		line2 := "            " + styleMeta.Render(fmt.Sprintf("▲ %d · %s · last read %s",
+		line2 := indent + styleMeta.Render(fmt.Sprintf("▲ %d · %s · last read %s",
 			r.item.Score, pluralize(r.item.Descendants, "comment"), relAge(r.state.LastReadAt, now)))
 
 		b.WriteString(ansi.Truncate(line1, m.width, "…") + "\n")

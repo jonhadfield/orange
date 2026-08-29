@@ -93,6 +93,37 @@ func barWithHints(left string, width int, current view) string {
 	return left + strings.Repeat(" ", gap) + right
 }
 
+// barWithFlex is barWithHints with a middle section that gives way first:
+// the title of whatever is on screen, shrunk to whatever space the fixed
+// label and the nav hints leave, and dropped when that is too little to
+// read. Callers style flex themselves; it is truncated, not re-styled.
+func barWithFlex(left, flex string, width int, current view) string {
+	if flex != "" {
+		avail := width - lipgloss.Width(left) - lipgloss.Width(navHints(current)) - 4
+		if avail >= minFlexWidth {
+			left += " " + ansi.Truncate(flex, avail, "…")
+		}
+	}
+	return barWithHints(left, width, current)
+}
+
+// minFlexWidth is the narrowest a header title is worth showing at all.
+const minFlexWidth = 12
+
+// clamp confines v to [lo, hi].
+func clamp(v, lo, hi int) int {
+	return min(max(v, lo), hi)
+}
+
+// scrollCursor moves a list cursor half a screen of rows, which is what
+// ctrl+d and ctrl+u do in the list views. dir is 1 down, -1 up.
+func scrollCursor(cursor, count, rows, dir int) int {
+	if count == 0 {
+		return 0
+	}
+	return clamp(cursor+dir*max(1, rows/2), 0, count-1)
+}
+
 func pluralize(n int, word string) string {
 	if n == 1 {
 		return "1 " + word

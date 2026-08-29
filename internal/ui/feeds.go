@@ -19,6 +19,21 @@ const (
 	storyPageSize = 30
 	fetchTimeout  = 30 * time.Second
 	rowHeight     = 3 // title + meta + blank separator
+	tabBarHeight  = 2 // the tab bar and the blank line under it
+	// narrowWidth is where the story rows drop their rank column: below it
+	// the fixed gutter costs more than the numbering is worth.
+	narrowWidth = 60
+	// widths of the fixed columns in front of a story title, which the meta
+	// line underneath is indented to match
+	rankWidth  = 4 // "999."
+	badgeWidth = 6 // "▲ 1234"
+)
+
+// cursorMark is the bar drawn beside the selected row in the list views;
+// cursorMarkWidth is its width in cells, which is not its length in bytes.
+const (
+	cursorMark      = "▍ "
+	cursorMarkWidth = 2
 )
 
 var feedOrder = []hn.Feed{hn.FeedTop, hn.FeedNew, hn.FeedBest, hn.FeedAsk, hn.FeedShow, hn.FeedJobs}
@@ -130,6 +145,12 @@ func (m feedsModel) loadMore(feed hn.Feed) tea.Cmd {
 	}
 }
 
+// visibleRows is how many stories fit in the space the view has. The last
+// row's trailing blank line falls off the bottom, hence the +1.
+func (m feedsModel) visibleRows() int {
+	return max(1, (m.height-tabBarHeight+1)/rowHeight)
+}
+
 func (m feedsModel) maybeLoadMore() tea.Cmd {
 	st := m.state()
 	if st.cursor >= len(st.items)-storyPageSize/3 {
@@ -226,6 +247,11 @@ func (m feedsModel) handleKey(msg tea.KeyPressMsg) (feedsModel, tea.Cmd) {
 			st.cursor = len(st.items) - 1
 		}
 		return m, m.maybeLoadMore()
+	case key.Matches(msg, m.keys.ScrollDown):
+		st.cursor = scrollCursor(st.cursor, len(st.items), m.visibleRows(), 1)
+		return m, m.maybeLoadMore()
+	case key.Matches(msg, m.keys.ScrollUp):
+		st.cursor = scrollCursor(st.cursor, len(st.items), m.visibleRows(), -1)
 	case key.Matches(msg, m.keys.Refresh):
 		if !st.loading {
 			*st = feedState{}
@@ -265,25 +291,104 @@ func (m feedsModel) View() string {
 }
 
 func (m feedsModel) tabBar() string {
-	parts := []string{styleLogo.Render("HN")}
-	for i, f := range feedOrder {
-		style := styleTab
-		if i == m.active {
-			style = styleTabActive
-		}
-		parts = append(parts, style.Render(fmt.Sprintf("%d %s", i+1, feedNames[f])))
+	logo := styleLogo.Render("HN")
+	// The nav hints only get their space if what is left still fits every
+	// tab; otherwise the tabs use the whole line and the hints drop out, as
+	// they do for the other views.
+	budget := m.width - lipgloss.Width(logo)
+	if hints := lipgloss.Width(navHints(viewFeeds)); m.tabsWidth() <= budget-hints-2 {
+		budget -= hints + 2
 	}
-	left := lipgloss.JoinHorizontal(lipgloss.Center, parts...)
-	return barWithHints(left, m.width, viewFeeds)
+	left := lipgloss.JoinHorizontal(lipgloss.Center, append([]string{logo}, m.tabs(budget)...)...)
+
+	flex := ""
+	if st := m.state(); st.loading && len(st.items) > 0 {
+		flex = styleMeta.Render(m.spinner.View() + " loading more…")
+	}
+	return barWithFlex(left, flex, m.width, viewFeeds)
+}
+
+// tabLabel renders one feed tab, numbered with its hotkey.
+func (m feedsModel) tabLabel(i int) string {
+	style := styleTab
+	if i == m.active {
+		style = styleTabActive
+	}
+	return style.Render(fmt.Sprintf("%d %s", i+1, feedNames[feedOrder[i]]))
+}
+
+func (m feedsModel) tabsWidth() int {
+	w := 0
+	for i := range feedOrder {
+		w += lipgloss.Width(m.tabLabel(i))
+	}
+	return w
+}
+
+// tabs returns the feed tabs that fit in budget columns, grown outwards from
+// the active one so it is never the tab that falls off the end. A "‹" or "›"
+// marks the feeds left out, and is paid for out of the same budget.
+func (m feedsModel) tabs(budget int) []string {
+	labels := make([]string, len(feedOrder))
+	widths := make([]int, len(feedOrder))
+	for i := range feedOrder {
+		labels[i] = m.tabLabel(i)
+		widths[i] = lipgloss.Width(labels[i])
+	}
+	marker := lipgloss.Width(styleTab.Render("›"))
+	cost := func(first, last int) int {
+		w := 0
+		for i := first; i <= last; i++ {
+			w += widths[i]
+		}
+		if first > 0 {
+			w += marker
+		}
+		if last < len(labels)-1 {
+			w += marker
+		}
+		return w
+	}
+
+	first, last := m.active, m.active
+	for {
+		grew := false
+		if next := last + 1; next < len(labels) && cost(first, next) <= budget {
+			last, grew = next, true
+		}
+		if prev := first - 1; prev >= 0 && cost(prev, last) <= budget {
+			first, grew = prev, true
+		}
+		if !grew {
+			break
+		}
+	}
+	out := append([]string(nil), labels[first:last+1]...)
+	if first > 0 {
+		out = append([]string{styleTab.Render("‹")}, out...)
+	}
+	if last < len(labels)-1 {
+		out = append(out, styleTab.Render("›"))
+	}
+	return out
 }
 
 func (m feedsModel) rows(st *feedState) string {
-	visible := max(1, (m.height-2)/rowHeight)
+	visible := m.visibleRows()
 	start := 0
 	if st.cursor >= visible {
 		start = st.cursor - visible + 1
 	}
 	end := min(start+visible, len(st.items))
+
+	// On a narrow terminal the rank column costs more than it is worth, so
+	// it goes and the meta line moves back under the title with it.
+	showRank := m.width >= narrowWidth
+	gutter := cursorMarkWidth + badgeWidth + 1
+	if showRank {
+		gutter += rankWidth + 1
+	}
+	indent := strings.Repeat(" ", gutter)
 
 	now := time.Now()
 	var b strings.Builder
@@ -291,9 +396,9 @@ func (m feedsModel) rows(st *feedState) string {
 		it := st.items[i]
 		sel := i == st.cursor
 
-		cur := "  "
+		cur := strings.Repeat(" ", cursorMarkWidth)
 		if sel {
-			cur = styleCursorBar.Render("▍ ")
+			cur = styleCursorBar.Render(cursorMark)
 		}
 
 		badge := stylePoints.Render(fmt.Sprintf("▲ %-4d", it.Score))
@@ -309,7 +414,11 @@ func (m feedsModel) rows(st *feedState) string {
 		if sel {
 			titleStyle = styleTitleSel
 		}
-		line1 := fmt.Sprintf("%s%s %s %s", cur, styleMeta.Render(fmt.Sprintf("%3d.", i+1)), badge, titleStyle.Render(title))
+		line1 := cur
+		if showRank {
+			line1 += styleMeta.Render(fmt.Sprintf("%3d.", i+1)) + " "
+		}
+		line1 += badge + " " + titleStyle.Render(title)
 		if d := domain(it.URL); d != "" {
 			line1 += " " + styledLink(styleLink, it.URL, "("+d+")")
 			// Truncation can cut the hyperlink's closing sequence; reset
@@ -324,15 +433,12 @@ func (m feedsModel) rows(st *feedState) string {
 		if it.Type != "job" {
 			meta += " · " + pluralize(it.Descendants, "comment")
 		}
-		line2 := "             " + styleMeta.Render(meta)
+		line2 := indent + styleMeta.Render(meta)
 
 		b.WriteString(ansi.Truncate(line1, m.width, "…"))
 		b.WriteString("\n")
 		b.WriteString(ansi.Truncate(line2, m.width, "…"))
 		b.WriteString("\n\n")
-	}
-	if st.loading {
-		b.WriteString(styleMeta.Render(m.spinner.View() + " loading more…"))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

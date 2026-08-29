@@ -449,8 +449,11 @@ func (m hiringModel) View() string {
 	if m.loading {
 		counts = strings.TrimSpace(counts + " " + m.spinner.View() + " loading…")
 	}
-	header := styleLogo.Render("HN") + styleTabActive.Render("Hiring") + " " +
-		styleHeaderTitle.Render(title) + "  " + styleMeta.Render(counts)
+	left := styleLogo.Render("HN") + styleTabActive.Render("Hiring")
+	flex := styleHeaderTitle.Render(title)
+	if counts != "" {
+		flex += "  " + styleMeta.Render(counts)
+	}
 
 	var body string
 	switch {
@@ -464,12 +467,14 @@ func (m hiringModel) View() string {
 		body = m.vp.View()
 	}
 
-	footer := styleMeta.Render("/ filter · enter expand · o open post on HN")
+	// The keys themselves are in the help bar below; this line carries only
+	// what the help bar cannot say — the filter currently in force.
+	footer := ""
 	if m.filtering {
 		footer = m.input.View()
 	} else if q := strings.TrimSpace(m.input.Value()); q != "" {
 		footer = styleCollapsed.Render("filter: "+q) + styleMeta.Render("  (/ to edit)")
 	}
 
-	return barWithHints(header, m.vp.Width(), viewHiring) + "\n\n" + body + "\n" + footer
+	return barWithFlex(left, flex, m.vp.Width(), viewHiring) + "\n\n" + body + "\n" + footer
 }

@@ -92,6 +92,9 @@ func (m pulseModel) fetch() tea.Cmd {
 	}
 }
 
+// visibleRows is how many one-line rows fit below the header.
+func (m pulseModel) visibleRows() int { return max(1, m.height-tabBarHeight) }
+
 func (m pulseModel) selected() (hn.Item, bool) {
 	if m.cursor < len(m.rows) {
 		return m.rows[m.cursor].item, true
@@ -179,6 +182,10 @@ func (m pulseModel) Update(msg tea.Msg) (pulseModel, tea.Cmd) {
 			if len(m.rows) > 0 {
 				m.cursor = len(m.rows) - 1
 			}
+		case key.Matches(msg, m.keys.ScrollDown):
+			m.cursor = scrollCursor(m.cursor, len(m.rows), m.visibleRows(), 1)
+		case key.Matches(msg, m.keys.ScrollUp):
+			m.cursor = scrollCursor(m.cursor, len(m.rows), m.visibleRows(), -1)
 		case key.Matches(msg, m.keys.Refresh):
 			if !m.loading {
 				m.loading = true
@@ -198,8 +205,8 @@ func (m pulseModel) View() string {
 		status = fmt.Sprintf("refreshed %s · every %ds · r refreshes now",
 			relAge(m.refreshedAt.Unix(), time.Now()), int(pulseInterval.Seconds()))
 	}
-	header := styleLogo.Render("HN") + styleTabActive.Render("Pulse") + " " + styleMeta.Render(status)
-	b.WriteString(barWithHints(header, m.width, viewPulse))
+	header := styleLogo.Render("HN") + styleTabActive.Render("Pulse")
+	b.WriteString(barWithFlex(header, styleMeta.Render(status), m.width, viewPulse))
 	b.WriteString("\n\n")
 
 	switch {
@@ -208,7 +215,7 @@ func (m pulseModel) View() string {
 	case len(m.rows) == 0:
 		b.WriteString(styleMeta.Render(m.spinner.View() + " taking the first reading…"))
 	default:
-		visible := max(1, m.height-2)
+		visible := m.visibleRows()
 		start := 0
 		if m.cursor >= visible {
 			start = m.cursor - visible + 1
@@ -223,9 +230,9 @@ func (m pulseModel) View() string {
 
 func (m pulseModel) renderRow(i int) string {
 	r := m.rows[i]
-	cur := "  "
+	cur := strings.Repeat(" ", cursorMarkWidth)
 	if i == m.cursor {
-		cur = styleCursorBar.Render("▍ ")
+		cur = styleCursorBar.Render(cursorMark)
 	}
 	move := styleMeta.Render("  · ")
 	switch {
