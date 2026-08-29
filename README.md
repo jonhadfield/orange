@@ -113,6 +113,18 @@ narrows: the hints drop, the feed tabs window around the one you are
 reading, and the reply indentation stops before it squeezes out the
 comment text.
 
+### Watch list
+
+The watched stories are the only thing orange keeps on disk, in
+`watched.json` under your user config directory — `~/.config/orange/` on
+Linux and BSD, `~/Library/Application Support/orange/` on macOS. Nothing
+else is stored, and there is no configuration file.
+
+If that file is ever unreadable, orange moves it to `watched.json.corrupt`
+and carries on with an empty list, telling you where the old one went, so
+watching keeps working and the previous contents are still there to look
+at.
+
 ## Development
 
 ```sh

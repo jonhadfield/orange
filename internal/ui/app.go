@@ -64,7 +64,7 @@ type Model struct {
 // store (st may be nil; watching is then disabled).
 func New(client *hn.Client, st *store.Store) Model {
 	keys := newKeyMap()
-	return Model{
+	m := Model{
 		client:  client,
 		st:      st,
 		keys:    keys,
@@ -75,6 +75,14 @@ func New(client *hn.Client, st *store.Store) Model {
 		watched: newWatchedModel(client, st, keys),
 		hiring:  newHiringModel(client, keys),
 	}
+	// A warning printed before the alternate screen takes over scrolls past
+	// unseen, so a state file that had to be set aside is said here instead.
+	if st != nil {
+		if moved, ok := st.Recovered(); ok {
+			m.notice = "watch list was unreadable and has been started again; the old file is at " + moved
+		}
+	}
+	return m
 }
 
 func (m Model) Init() tea.Cmd {
@@ -313,7 +321,7 @@ func (m Model) toggleWatch() (Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.st == nil {
-		m.notice = "watching unavailable (state file could not be opened)"
+		m.notice = storeUnavailable("watching")
 		return m, nil
 	}
 	watching, err := m.st.Toggle(it.ID, it.Title, it.Descendants, time.Now().Unix())
@@ -343,6 +351,17 @@ func (m Model) current() (hn.Item, bool) {
 	default:
 		return m.feeds.selected()
 	}
+}
+
+// storeUnavailable explains that there is no watch state to work with, and
+// names the file it would have come from: without the path there is nothing
+// the reader can go and fix, and it is documented nowhere else.
+func storeUnavailable(what string) string {
+	p, err := store.DefaultPath()
+	if err != nil {
+		return what + " unavailable (state file could not be opened)"
+	}
+	return what + " unavailable: could not open " + p
 }
 
 // footer is the bottom chrome: the contextual key bar, with any notice

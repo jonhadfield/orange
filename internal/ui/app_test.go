@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -8,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jonhadfield/orange/internal/hn"
+	"github.com/jonhadfield/orange/internal/store"
 )
 
 // newTestModel builds a root model sized for rendering, without running the
@@ -119,5 +122,66 @@ func TestKeyPressesDoNotPanic(t *testing.T) {
 		if strings.TrimSpace(m.View().Content) == "" {
 			t.Fatalf("view went blank after key %q", k)
 		}
+	}
+}
+
+// TestRecoveredStoreIsAnnounced: the warning main prints before the
+// alternate screen takes over scrolls past unseen, so a state file that had
+// to be set aside has to be said inside the reader, on the first frame,
+// naming where the old file went.
+func TestRecoveredStoreIsAnnounced(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "watched.json")
+	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+
+	m := New(hn.NewClient("http://unused.invalid"), st)
+	if m.notice == "" {
+		t.Fatal("no notice after recovering a corrupt state file")
+	}
+	if !strings.Contains(m.notice, path+".corrupt") {
+		t.Errorf("notice does not say where the old file went:\n%s", m.notice)
+	}
+
+	// And it is on screen, not merely on the model.
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	if content := stripStyles(next.(Model).View().Content); !strings.Contains(content, "unreadable") {
+		t.Errorf("the notice is not rendered:\n%s", content)
+	}
+}
+
+// TestNoNoticeForAHealthyStore is the other half: an ordinary start says
+// nothing.
+func TestNoNoticeForAHealthyStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "watched.json")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if m := New(hn.NewClient("http://unused.invalid"), st); m.notice != "" {
+		t.Errorf("notice on a clean start: %q", m.notice)
+	}
+	if m := New(hn.NewClient("http://unused.invalid"), nil); m.notice != "" {
+		t.Errorf("notice with no store at all: %q", m.notice)
+	}
+}
+
+// TestStoreUnavailableNamesTheFile: without the path there is nothing the
+// reader can go and fix, and it is documented nowhere else.
+func TestStoreUnavailableNamesTheFile(t *testing.T) {
+	want, err := store.DefaultPath()
+	if err != nil {
+		t.Skipf("no user config dir on this machine: %v", err)
+	}
+	got := storeUnavailable("watching")
+	if !strings.Contains(got, want) {
+		t.Errorf("storeUnavailable() = %q, want it to name %q", got, want)
+	}
+	if !strings.HasPrefix(got, "watching") {
+		t.Errorf("storeUnavailable(%q) = %q, want it to start with the subject", "watching", got)
 	}
 }
