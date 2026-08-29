@@ -15,9 +15,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The same pin as ci.yml, for a different reason: releases are built
+      # with the Go the test job actually ran against, rather than whatever
+      # "stable" has moved on to since. Shipping binaries from a toolchain
+      # nothing tested is the gap this closes.
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version-file: go.mod
 
       - uses: goreleaser/goreleaser-action@v6
         with:
