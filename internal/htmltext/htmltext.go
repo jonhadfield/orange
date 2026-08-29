@@ -93,7 +93,7 @@ func convert(src string, linkify bool) string {
 		}
 		rawTag := strings.TrimSpace(s[:gt])
 		s = s[gt+1:]
-		name, attrs, _ := strings.Cut(rawTag, " ")
+		name, attrs := cutTagName(rawTag)
 		switch strings.ToLower(name) {
 		case "p", "/p":
 			if !inPre && !inLink {
@@ -141,6 +141,18 @@ func convert(src string, linkify bool) string {
 		result = strings.ReplaceAll(result, "\n\n\n", "\n\n")
 	}
 	return strings.TrimSpace(result)
+}
+
+// cutTagName splits a tag into its name and the attributes after it. HTML
+// separates the two with any whitespace, not only a space: <a\nhref="x"> is
+// an ordinary link, and cutting on " " alone made the name the whole of
+// `a\nhref="x"`, which matched no case, so the tag and its attributes were
+// dropped rather than rendered.
+func cutTagName(tag string) (name, attrs string) {
+	if i := strings.IndexAny(tag, " \t\r\n\f"); i >= 0 {
+		return tag[:i], tag[i+1:]
+	}
+	return tag, ""
 }
 
 // attrValue extracts an attribute value from a tag's attribute list, e.g.
