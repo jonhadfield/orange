@@ -14,9 +14,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # go.mod is the single source of truth for the Go version, rather
+      # than "stable": golangci-lint cannot typecheck a standard library
+      # newer than the Go it was built with, so a "stable" that rolls
+      # forward breaks the lint job on a release that has nothing to do
+      # with this module. Bumping the go directive is now the deliberate
+      # moment to check the linter pin below still keeps up.
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version-file: go.mod
 
       - name: Check formatting
         run: |
@@ -40,9 +46,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # See the note in the test job: the Go version comes from go.mod so it
+      # cannot roll ahead of what this linter build is able to typecheck.
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version-file: go.mod
 
       # v6 resolves "latest" within the golangci-lint v1 line, which is built
       # with an older Go than this module targets and refuses to load. v9
