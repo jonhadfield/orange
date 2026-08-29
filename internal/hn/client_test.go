@@ -329,3 +329,41 @@ func TestCacheConcurrentAccess(t *testing.T) {
 		t.Errorf("cache holds %d, over its limit of 20", got)
 	}
 }
+
+// TestItemStringsAreStrippedOfControls: titles and authors are rendered
+// straight into the terminal without going near the HTML renderer, so the
+// stripping has to happen where the response is decoded, not only there.
+func TestItemStringsAreStrippedOfControls(t *testing.T) {
+	items := map[int]Item{
+		1: {
+			ID:    1,
+			Type:  "story\x1b",
+			By:    "user\x1b[31m",
+			Title: "A title\x1b]8;;http://evil\x1b\\ with an escape",
+			URL:   "https://example.com/\x07path",
+			Text:  "body\x00with\x9bcontrols",
+		},
+	}
+	srv := newTestServer(t, nil, items, nil)
+	c := NewClient(srv.URL)
+
+	it, err := c.Item(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("Item: %v", err)
+	}
+	for _, f := range []struct{ name, got string }{
+		{"Type", it.Type}, {"By", it.By}, {"Title", it.Title},
+		{"URL", it.URL}, {"Text", it.Text},
+	} {
+		for _, r := range f.got {
+			if r < 0x20 && r != '\n' && r != '\t' || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+				t.Errorf("%s = %q, still contains %#U", f.name, f.got, r)
+				break
+			}
+		}
+	}
+	// The readable content survives.
+	if !strings.Contains(it.Title, "A title") || !strings.Contains(it.By, "user") {
+		t.Errorf("stripping removed more than the controls: title=%q by=%q", it.Title, it.By)
+	}
+}

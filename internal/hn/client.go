@@ -203,6 +203,7 @@ func (c *Client) item(ctx context.Context, id int, fresh bool) (Item, error) {
 	if it.ID == 0 {
 		return Item{}, fmt.Errorf("hn: item %d not found", id)
 	}
+	it.sanitize()
 	c.store(id, it)
 	return it, nil
 }

@@ -22,6 +22,47 @@ func ConvertLinked(src string) string {
 	return convert(src, true)
 }
 
+// StripControl removes control characters from text that came from the API
+// and is about to be written to a terminal. C0 controls, DEL and the C1
+// range are acted on rather than displayed: a bare ESC begins a sequence the
+// terminal will obey, and BEL ends an OSC string, so either can break out of
+// what orange meant to draw.
+//
+// Tab and newline are kept, since the rendering relies on them. Carriage
+// return is not: it would move the cursor back over what has been written.
+func StripControl(s string) string {
+	if !strings.ContainsFunc(s, isControl) {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if isControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func isControl(r rune) bool {
+	switch {
+	case r == '\n' || r == '\t':
+		return false
+	case r < 0x20, r == 0x7f:
+		return true
+	case r >= 0x80 && r <= 0x9f:
+		return true
+	}
+	return false
+}
+
+// text is how every piece of API-sourced content enters the output:
+// unescaped, then stripped of anything the terminal would act on. The
+// stripping has to come after the unescaping, since an escaped &#x1b; is
+// how a control character would actually arrive from a site that escapes
+// its HTML.
+func text(s string) string {
+	return StripControl(html.UnescapeString(s))
+}
+
 func convert(src string, linkify bool) string {
 	var (
 		out    strings.Builder
@@ -79,16 +120,16 @@ func convert(src string, linkify bool) string {
 	for s != "" {
 		lt := strings.IndexByte(s, '<')
 		if lt < 0 {
-			dst().WriteString(html.UnescapeString(s))
+			dst().WriteString(text(s))
 			break
 		}
 		if lt > 0 {
-			dst().WriteString(html.UnescapeString(s[:lt]))
+			dst().WriteString(text(s[:lt]))
 		}
 		s = s[lt+1:]
 		gt := strings.IndexByte(s, '>')
 		if gt < 0 {
-			dst().WriteString("<" + html.UnescapeString(s))
+			dst().WriteString("<" + text(s))
 			break
 		}
 		rawTag := strings.TrimSpace(s[:gt])
@@ -193,15 +234,15 @@ func attrText(s string) string {
 	}
 	if q := s[0]; q == '"' || q == '\'' {
 		if end := strings.IndexByte(s[1:], q); end >= 0 {
-			return html.UnescapeString(s[1 : 1+end])
+			return text(s[1 : 1+end])
 		}
-		return html.UnescapeString(s[1:])
+		return text(s[1:])
 	}
 	end := strings.IndexAny(s, " \t\r\n")
 	if end < 0 {
 		end = len(s)
 	}
-	return html.UnescapeString(s[:end])
+	return text(s[:end])
 }
 
 // isAttrNameByte reports whether c can appear in an HTML attribute name,
