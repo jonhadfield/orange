@@ -58,9 +58,13 @@ Data Mining) owns the `orange` token. The installed command is still
 If you installed an earlier version under the old token, switch over with:
 
 ```sh
-brew uninstall --cask jonhadfield/tap/orange
+brew uninstall --cask orange
 brew install jonhadfield/tap/orange-cli
 ```
+
+The uninstall is unqualified on purpose: the old `orange` cask is no longer
+in the tap, so naming it as `jonhadfield/tap/orange` fails to resolve.
+Homebrew still knows about the copy you installed.
 
 Or with Go 1.26 or later:
 
