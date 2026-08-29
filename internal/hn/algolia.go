@@ -41,21 +41,26 @@ func (c *Client) PastDiscussions(ctx context.Context, storyURL string, excludeID
 		"query":                        {storyURL},
 		"restrictSearchableAttributes": {"url"},
 		"tags":                         {"story"},
-		"hitsPerPage":                  {"10"},
+		// The URL search is fuzzy and the exact matches are filtered out
+		// of it below, so a heavily resubmitted page needs a page deep
+		// enough that its own submissions are not pushed off the end by
+		// near misses.
+		"hitsPerPage": {"50"},
 	}
 	var resp algoliaResponse
 	if err := c.getURL(ctx, c.algoliaURL+"/search?"+q.Encode(), &resp); err != nil {
 		return nil, err
 	}
-	norm := func(s string) string { return strings.TrimRight(s, "/") }
+	want := canonicalURL(storyURL)
 	var out []PastDiscussion
 	for _, h := range resp.Hits {
 		id, err := strconv.Atoi(h.ObjectID)
 		if err != nil || id == excludeID {
 			continue
 		}
-		// The URL attribute search is fuzzy; keep exact matches only.
-		if norm(h.URL) != norm(storyURL) {
+		// The URL attribute search is fuzzy; keep the ones pointing at the
+		// same page.
+		if canonicalURL(h.URL) != want {
 			continue
 		}
 		out = append(out, PastDiscussion{
@@ -71,6 +76,74 @@ func (c *Client) PastDiscussions(ctx context.Context, storyURL string, excludeID
 		out = out[:5]
 	}
 	return out, nil
+}
+
+// trackingParams are query parameters that record where a click came from
+// rather than what is being linked to. The list is deliberately short:
+// dropping a parameter that does carry meaning would merge two genuinely
+// different pages into one discussion, which is a worse failure than the
+// missed match this is here to fix.
+var trackingParams = map[string]bool{
+	"fbclid":  true,
+	"gclid":   true,
+	"dclid":   true,
+	"msclkid": true,
+	"yclid":   true,
+	"igshid":  true,
+	"mc_cid":  true,
+	"mc_eid":  true,
+	"ref_src": true,
+}
+
+// canonicalURL reduces a submission URL to a key for deciding whether two
+// submissions point at the same page. HN's own submissions of one page
+// differ in ways that say nothing about the target — http against https,
+// www against the bare host, a tracking parameter picked up on the way, a
+// fragment — and this feature exists to surface submissions made years
+// apart, which is exactly when those differences show up.
+//
+// The scheme is dropped rather than compared, which is what makes http and
+// https equivalent.
+func canonicalURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		// Not an absolute URL, so there is nothing to take apart. Compare
+		// it as it stands, as the previous exact match did.
+		return strings.TrimRight(raw, "/")
+	}
+
+	host := strings.ToLower(u.Hostname())
+	host = strings.TrimPrefix(host, "www.")
+	// A default port says nothing either.
+	if port := u.Port(); port != "" && port != "80" && port != "443" {
+		host += ":" + port
+	}
+
+	// The path keeps its case: only the host is case-insensitive.
+	key := host + strings.TrimRight(u.Path, "/")
+	if q := canonicalQuery(u.Query()); q != "" {
+		key += "?" + q
+	}
+	// The fragment is left out entirely: it selects a place within the
+	// page, not a different page.
+	return key
+}
+
+// canonicalQuery drops tracking parameters and puts the rest in a fixed
+// order, so two submissions differing only in parameter order still match.
+func canonicalQuery(q url.Values) string {
+	for k := range q {
+		if trackingParams[strings.ToLower(k)] || strings.HasPrefix(strings.ToLower(k), "utm_") {
+			delete(q, k)
+		}
+	}
+	// Encode sorts by key, and the values within each key are sorted here
+	// so that ?a=2&a=1 and ?a=1&a=2 agree.
+	for _, vs := range q {
+		sort.Strings(vs)
+	}
+	return q.Encode()
 }
 
 // algoliaNode is one item in Algolia's nested item tree. Absent fields come

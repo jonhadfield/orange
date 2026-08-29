@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -155,5 +157,123 @@ func TestItemTreeMissingItem(t *testing.T) {
 	})
 	if _, err := c.ItemTree(context.Background(), 100); err == nil {
 		t.Error("ItemTree for an unknown item: got nil error, want error")
+	}
+}
+
+// TestCanonicalURL pins what counts as the same page. The pairs that must
+// match are the ones HN actually produces when the same page is submitted
+// years apart; the pairs that must not are the ones where merging them
+// would show a discussion of something else.
+func TestCanonicalURL(t *testing.T) {
+	same := [][2]string{
+		{"http://example.com/post", "https://example.com/post"},
+		{"https://www.example.com/post", "https://example.com/post"},
+		{"https://EXAMPLE.com/post", "https://example.com/post"},
+		{"https://example.com/post/", "https://example.com/post"},
+		{"https://example.com/post#section", "https://example.com/post"},
+		{"https://example.com/post?utm_source=hn&utm_medium=web", "https://example.com/post"},
+		{"https://example.com/post?fbclid=abc", "https://example.com/post"},
+		{"https://example.com/post?id=7&utm_campaign=x", "https://example.com/post?id=7"},
+		{"https://example.com/post?a=1&b=2", "https://example.com/post?b=2&a=1"},
+		{"https://example.com:443/post", "https://example.com/post"},
+		{"http://example.com:80/post", "https://example.com/post"},
+		{"  https://example.com/post  ", "https://example.com/post"},
+		{"http://WWW.Example.COM/post/?utm_source=x#top", "https://example.com/post"},
+	}
+	for _, p := range same {
+		if a, b := canonicalURL(p[0]), canonicalURL(p[1]); a != b {
+			t.Errorf("canonicalURL(%q) = %q, canonicalURL(%q) = %q, want the same", p[0], a, p[1], b)
+		}
+	}
+
+	different := [][2]string{
+		{"https://example.com/post", "https://example.com/other"},
+		{"https://example.com/post", "https://example.org/post"},
+		// Paths are case-sensitive; only the host is not.
+		{"https://example.com/Post", "https://example.com/post"},
+		// A meaningful parameter is not a tracking one.
+		{"https://example.com/post?id=7", "https://example.com/post?id=8"},
+		{"https://example.com/post?id=7", "https://example.com/post"},
+		// A non-default port is part of the address.
+		{"https://example.com:8443/post", "https://example.com/post"},
+		// www is only dropped from the front of the host.
+		{"https://www.example.com/post", "https://example.com/www.post"},
+	}
+	for _, p := range different {
+		if a, b := canonicalURL(p[0]), canonicalURL(p[1]); a == b {
+			t.Errorf("canonicalURL(%q) and canonicalURL(%q) both = %q, want different", p[0], p[1], a)
+		}
+	}
+}
+
+// TestCanonicalURLUnparseable: a hit that is not an absolute URL falls back
+// to the exact comparison rather than collapsing to an empty key, which
+// would make every such hit match every other.
+func TestCanonicalURLUnparseable(t *testing.T) {
+	for _, s := range []string{"", "not a url", "item?id=123", "/relative/path"} {
+		if got := canonicalURL(s); got != strings.TrimRight(strings.TrimSpace(s), "/") {
+			t.Errorf("canonicalURL(%q) = %q, want it left alone", s, got)
+		}
+	}
+	// And two different unparseable strings stay different.
+	if canonicalURL("not a url") == canonicalURL("also not a url") {
+		t.Error("two unparseable URLs collapsed to the same key")
+	}
+}
+
+// TestPastDiscussionsMatchesURLVariants is the bug in the issue: genuine
+// earlier submissions were dropped whenever they differed from the current
+// one in any way but a trailing slash.
+func TestPastDiscussionsMatchesURLVariants(t *testing.T) {
+	c := newAlgoliaClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(`{"hits":[
+			{"objectID":"100","title":"current","url":"https://www.example.com/post","points":10,"num_comments":5,"created_at_i":1000},
+			{"objectID":"200","title":"http, years ago","url":"http://example.com/post","points":300,"num_comments":450,"created_at_i":2000},
+			{"objectID":"300","title":"with www","url":"https://www.example.com/post","points":50,"num_comments":300,"created_at_i":3000},
+			{"objectID":"400","title":"with tracking","url":"https://example.com/post?utm_source=twitter","points":50,"num_comments":200,"created_at_i":4000},
+			{"objectID":"500","title":"with fragment","url":"https://example.com/post#comments","points":50,"num_comments":100,"created_at_i":5000},
+			{"objectID":"600","title":"host case","url":"https://EXAMPLE.com/post/","points":50,"num_comments":50,"created_at_i":6000},
+			{"objectID":"700","title":"a different page","url":"https://example.com/other","points":900,"num_comments":900,"created_at_i":7000}
+		]}`))
+	})
+
+	got, err := c.PastDiscussions(context.Background(), "https://www.example.com/post", 100)
+	if err != nil {
+		t.Fatalf("PastDiscussions: %v", err)
+	}
+	if len(got) != 5 {
+		t.Fatalf("got %d discussions, want 5: %+v", len(got), got)
+	}
+	// Most-commented first, and the current story and other page are gone.
+	want := []int{200, 300, 400, 500, 600}
+	for i, id := range want {
+		if got[i].ID != id {
+			t.Errorf("result %d = %d, want %d (full: %+v)", i, got[i].ID, id, got)
+		}
+	}
+}
+
+// TestPastDiscussionsAsksForADeepPage: the exact matches are filtered out of
+// a fuzzy result, so the page has to be deep enough that a heavily
+// resubmitted URL does not lose its own submissions to near misses.
+func TestPastDiscussionsAsksForADeepPage(t *testing.T) {
+	var got string
+	c := newAlgoliaClient(t, func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Query().Get("hitsPerPage")
+		w.Write([]byte(`{"hits":[]}`))
+	})
+	if _, err := c.PastDiscussions(context.Background(), "https://example.com/x", 1); err != nil {
+		t.Fatalf("PastDiscussions: %v", err)
+	}
+	n, err := strconv.Atoi(got)
+	if err != nil {
+		t.Fatalf("hitsPerPage = %q: %v", got, err)
+	}
+	if n < 50 {
+		t.Errorf("hitsPerPage = %d, want at least 50", n)
 	}
 }
