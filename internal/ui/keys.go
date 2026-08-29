@@ -27,14 +27,16 @@ type keyMap struct {
 
 func newKeyMap() keyMap {
 	return keyMap{
+		// Up/Top/ScrollDown carry the help text for their pair, since the
+		// help lists each pair once; see helpkeys.go.
 		Up:     key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("j/k", "move")),
 		Down:   key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j/↓", "down")),
 		Top:    key.NewBinding(key.WithKeys("g", "home"), key.WithHelp("g/G", "top/bottom")),
 		Bottom: key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "bottom")),
 		ScrollDown: key.NewBinding(key.WithKeys("ctrl+d", "pgdown"),
-			key.WithHelp("ctrl+d/u", "scroll half page")),
+			key.WithHelp("ctrl+d/u", "half page")),
 		ScrollUp: key.NewBinding(key.WithKeys("ctrl+u", "pgup"),
-			key.WithHelp("ctrl+u", "scroll up")),
+			key.WithHelp("ctrl+u", "up half page")),
 		NextFeed: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab/1-6", "switch feed")),
 		PrevFeed: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous feed")),
 		Open:     key.NewBinding(key.WithKeys("enter", "l"), key.WithHelp("enter/l", "open / fold")),
@@ -49,18 +51,5 @@ func newKeyMap() keyMap {
 		Back:     key.NewBinding(key.WithKeys("esc", "h", "b"), key.WithHelp("esc/h/b", "back")),
 		Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
-	}
-}
-
-// FullHelp is the expanded overlay toggled with "?". The short bar is
-// built per view; see helpKeys in helpkeys.go.
-func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{k.Up, k.Down, k.Top, k.Bottom},
-		{k.ScrollDown, k.ScrollUp},
-		{k.NextFeed, k.PrevFeed, k.Open, k.Back},
-		{k.OpenURL, k.OpenHN, k.Watch, k.Watched},
-		{k.Pulse, k.Hiring, k.Refresh, k.Filter},
-		{k.Help, k.Quit},
 	}
 }

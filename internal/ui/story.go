@@ -21,6 +21,16 @@ import (
 // wheelLines is how far one wheel or trackpad notch scrolls a text view.
 const wheelLines = 3
 
+// minCommentWidth is the narrowest column a comment body is allowed, and so
+// what the thread indentation has to leave room for.
+const minCommentWidth = 32
+
+// maxGuideDepth is how many levels of reply indentation a terminal this wide
+// can show while still leaving a comment room to wrap.
+func maxGuideDepth(width int) int {
+	return max(1, (width-minCommentWidth)/2)
+}
+
 const (
 	commentBatchSize = 24
 	// Batches run concurrently so the Firebase reconciliation pass finishes
@@ -82,7 +92,7 @@ func newStoryModel(client *hn.Client, keys keyMap) storyModel {
 
 func (m *storyModel) setSize(w, h int) {
 	m.vp.SetWidth(w)
-	m.vp.SetHeight(max(1, h-1)) // reserve one line for the status footer
+	m.vp.SetHeight(max(1, h-2)) // reserve a line each for the top bar and the status
 	if m.tree != nil {
 		m.renderContent()
 		m.ensureCursorVisible()
@@ -473,7 +483,7 @@ func (m *storyModel) header(now time.Time) string {
 	}
 	meta := fmt.Sprintf("▲ %d · by %s · %s · %s",
 		m.story.Score, m.story.By, relAge(m.story.Time, now), pluralize(m.story.Descendants, "comment"))
-	b.WriteString(stylePoints.Render(meta))
+	b.WriteString(stylePoints.Render(ansi.Truncate(meta, w, "…")))
 	b.WriteString("\n")
 	if len(m.past) > 0 {
 		b.WriteString("\n")
@@ -498,10 +508,17 @@ func (m *storyModel) header(now time.Time) string {
 }
 
 func (m *storyModel) renderNode(n *commentNode, selected bool, now time.Time) string {
-	indentWidth := n.depth * 2
+	// Guides stop at the depth the terminal can afford: past that the reply
+	// would have nowhere left to wrap. A "⋯" in place of the first guide
+	// says the comment sits deeper than the indentation shows.
+	depth := min(n.depth, maxGuideDepth(m.vp.Width()))
+	indentWidth := depth * 2
 	guide := ""
-	if n.depth > 0 {
-		guide = styleGuide.Render(strings.Repeat("▏ ", n.depth))
+	switch {
+	case depth < n.depth:
+		guide = styleGuide.Render("⋯ " + strings.Repeat("▏ ", depth-1))
+	case depth > 0:
+		guide = styleGuide.Render(strings.Repeat("▏ ", depth))
 	}
 
 	arrow := "▾"
@@ -535,7 +552,10 @@ func (m *storyModel) renderNode(n *commentNode, selected bool, now time.Time) st
 
 	block := meta
 	if !n.collapsed && !n.placeholder {
-		wrapWidth := max(20, m.vp.Width()-indentWidth-1)
+		// The indentation is already capped, so what is left is a column
+		// worth reading — except on a terminal narrower than that cap, where
+		// the terminal wins.
+		wrapWidth := max(1, m.vp.Width()-indentWidth-1)
 		block += "\n" + lipgloss.NewStyle().Width(wrapWidth).Render(n.text)
 	}
 
@@ -552,6 +572,14 @@ func prefixLines(s, prefix string) string {
 		lines[i] = prefix + lines[i]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// bar is the header line: the same shape as the other views, keeping the
+// story identified and the p/H/W destinations offered once the header
+// inside the thread has scrolled away.
+func (m storyModel) bar() string {
+	left := styleLogo.Render("HN") + styleTabActive.Render("Story")
+	return barWithFlex(left, styleMeta.Render(m.story.Title), m.vp.Width(), viewStory)
 }
 
 func (m storyModel) View() string {
@@ -572,5 +600,5 @@ func (m storyModel) View() string {
 			status += styleError.Render("  ⚠ " + m.warn)
 		}
 	}
-	return m.vp.View() + "\n" + status
+	return m.bar() + "\n" + m.vp.View() + "\n" + status
 }

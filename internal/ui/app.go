@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -14,6 +15,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/pkg/browser"
 
 	"github.com/jonhadfield/orange/internal/hn"
@@ -53,6 +55,9 @@ type Model struct {
 	width    int
 	height   int
 	notice   string
+	// the size last handed to the child views, so they are only re-sized
+	// when the space available to them actually changes
+	sizedW, sizedH int
 }
 
 // New builds the root model backed by the given HN client and local state
@@ -79,7 +84,16 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.feeds.init(), tea.RequestBackgroundColor)
 }
 
+// Update handles the message and then re-applies the layout, because the
+// footer is not a fixed height: a notice or the full help overlay takes
+// rows away from the view above, and it has to be told.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	(&next).applyLayout()
+	return next, cmd
+}
+
+func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.BackgroundColorMsg:
 		setTheme(msg.IsDark())
@@ -95,12 +109,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.help.SetWidth(msg.Width)
-		content := max(1, msg.Height-2)
-		m.feeds.setSize(msg.Width, content)
-		m.story.setSize(msg.Width, content)
-		m.pulse.setSize(msg.Width, content)
-		m.watched.setSize(msg.Width, content)
-		m.hiring.setSize(msg.Width, content)
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -182,7 +190,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m.delegate(msg)
 }
 
-func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	// The hiring filter input owns the keyboard while active.
 	if m.view == viewHiring && m.hiring.capturing() {
 		var cmd tea.Cmd
@@ -261,7 +269,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // delegate routes a message to the active view's model.
-func (m Model) delegate(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) delegate(msg tea.Msg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.view {
 	case viewFeeds:
@@ -280,7 +288,7 @@ func (m Model) delegate(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // openStory switches to the story view. For watched stories the previous
 // read position highlights new comments, and the read marker advances.
-func (m Model) openStory(it hn.Item, from view) (tea.Model, tea.Cmd) {
+func (m Model) openStory(it hn.Item, from view) (Model, tea.Cmd) {
 	if from != viewStory {
 		m.prevView = from
 	}
@@ -299,7 +307,7 @@ func (m Model) openStory(it hn.Item, from view) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m Model) toggleWatch() (tea.Model, tea.Cmd) {
+func (m Model) toggleWatch() (Model, tea.Cmd) {
 	it, ok := m.current()
 	if !ok {
 		return m, nil
@@ -337,6 +345,51 @@ func (m Model) current() (hn.Item, bool) {
 	}
 }
 
+// footer is the bottom chrome: the contextual key bar, with any notice
+// above it. Every line is truncated here because the help bubble gives up
+// on truncating once an item lands near the edge and overshoots instead,
+// which would wrap the bar and push the view off the top of the screen.
+func (m Model) footer() string {
+	bottom := m.help.View(m.helpKeys())
+	if m.notice != "" {
+		bottom = styleError.Render(m.notice) + "\n" + bottom
+	}
+	lines := strings.Split(bottom, "\n")
+	// On a very short terminal the footer has to give way too, or there
+	// would be no frame left for the view above it.
+	if limit := max(1, m.height-2); len(lines) > limit {
+		lines = lines[:limit]
+	}
+	for i, l := range lines {
+		lines[i] = ansi.Truncate(l, m.width, "…")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// contentHeight is the number of rows left for the active view once the
+// footer has taken its share.
+func (m Model) contentHeight() int {
+	return max(1, m.height-lipgloss.Height(m.footer())-1)
+}
+
+// applyLayout hands the current content size to every view, so the one on
+// screen renders exactly the rows it is going to be shown.
+func (m *Model) applyLayout() {
+	if m.width == 0 {
+		return
+	}
+	h := m.contentHeight()
+	if m.width == m.sizedW && h == m.sizedH {
+		return
+	}
+	m.sizedW, m.sizedH = m.width, h
+	m.feeds.setSize(m.width, h)
+	m.story.setSize(m.width, h)
+	m.pulse.setSize(m.width, h)
+	m.watched.setSize(m.width, h)
+	m.hiring.setSize(m.width, h)
+}
+
 func (m Model) View() tea.View {
 	// v2 makes the alternate screen a property of the view rather than a
 	// program option, so it is declared on every frame.
@@ -363,11 +416,7 @@ func (m Model) View() tea.View {
 		content = m.feeds.View()
 	}
 
-	bottom := m.help.View(m.helpKeys())
-	if m.notice != "" {
-		bottom = styleError.Render(m.notice) + "\n" + bottom
-	}
-
+	bottom := m.footer()
 	contentHeight := max(1, m.height-lipgloss.Height(bottom)-1)
 	content = lipgloss.NewStyle().
 		Height(contentHeight).

@@ -86,10 +86,10 @@ orange
 | ------------------- | --------------------------------------------- |
 | `j` / `k`, `↓` / `↑`| Move selection / scroll                       |
 | `g` / `G`           | Jump to top / bottom                          |
-| `ctrl+d` / `ctrl+u` | Scroll half a page; the selection follows      |
+| `ctrl+d` / `ctrl+u` | Move half a page; the selection follows       |
 | Mouse wheel / trackpad | Scroll; the selection follows              |
 | `tab` / `shift+tab` | Next / previous feed                          |
-| `1`–`6`             | Jump straight to a feed                       |
+| `1`–`6`             | Jump straight to a feed (on the story list)   |
 | `enter` / `l`       | Open story; in a thread, fold/unfold comment  |
 | `1`–`5` (in thread) | Open a past discussion of the same link       |
 | `o`                 | Open the story link in your browser           |
@@ -104,8 +104,12 @@ orange
 | `?`                 | Toggle help                                   |
 | `q`                 | Quit                                          |
 
-The feed hotkeys (`1`–`6`) and the `p`/`H`/`W` views are shown in the top
-bar, so nothing is hidden behind the help screen.
+Every view carries a top bar with the `p`/`H`/`W` destinations, and a key
+bar along the bottom listing what that view responds to — `?` expands it
+into the full set for the view you are on. Both give way as the terminal
+narrows: the hints drop, the feed tabs window around the one you are
+reading, and the reply indentation stops before it squeezes out the
+comment text.
 
 ## Development
 
