@@ -207,3 +207,77 @@ func TestAttrValue(t *testing.T) {
 		}
 	}
 }
+
+// TestConvertTagWhitespace: HTML separates a tag's name from its attributes
+// with any whitespace, not only a space. Cutting on " " alone made the whole
+// of `a\nhref="x"` the tag name, which matched no case, so the tag was
+// dropped and took its attributes and its rendering with it.
+func TestConvertTagWhitespace(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "newline before the attributes",
+			in:   "<a\nhref=\"https://x.com/\">this</a>",
+			want: "this (https://x.com/)",
+		},
+		{
+			name: "newline before attributes, more attributes after",
+			in:   "<a\nhref=\"https://x.com/\" rel=\"nofollow\">this</a>",
+			want: "this (https://x.com/)",
+		},
+		{
+			name: "tab before the attributes",
+			in:   "<a\thref=\"https://x.com/\">this</a>",
+			want: "this (https://x.com/)",
+		},
+		{
+			name: "several spaces before the attributes",
+			in:   `<a   href="https://x.com/">this</a>`,
+			want: "this (https://x.com/)",
+		},
+		{
+			name: "a paragraph split across lines still breaks",
+			in:   "one<p\nclass=\"c\">two",
+			want: "one\n\ntwo",
+		},
+		{
+			name: "a pre split across lines still indents",
+			in:   "a<p><pre\nclass=\"c\"><code>x := 1</code></pre>",
+			want: "a\n\n    x := 1",
+		},
+		{
+			name: "a tag name alone is unchanged",
+			in:   "<i>word</i>",
+			want: "_word_",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Convert(tt.in); got != tt.want {
+				t.Errorf("Convert(%q)\n got: %q\nwant: %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCutTagName(t *testing.T) {
+	tests := []struct{ tag, name, attrs string }{
+		{`a href="x"`, "a", `href="x"`},
+		{"a\nhref=\"x\"", "a", `href="x"`},
+		{"a\thref=\"x\"", "a", `href="x"`},
+		{"a\r\nhref=\"x\"", "a", "\nhref=\"x\""},
+		{"a", "a", ""},
+		{"/a", "/a", ""},
+		{"br/", "br/", ""},
+		{"br /", "br", "/"},
+	}
+	for _, tt := range tests {
+		name, attrs := cutTagName(tt.tag)
+		if name != tt.name || attrs != tt.attrs {
+			t.Errorf("cutTagName(%q) = (%q, %q), want (%q, %q)", tt.tag, name, attrs, tt.name, tt.attrs)
+		}
+	}
+}
