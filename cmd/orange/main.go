@@ -17,13 +17,46 @@ import (
 // version is set at build time via -ldflags "-X main.version=...".
 var version = "dev"
 
+const usage = `orange — a terminal reader for Hacker News.
+
+Usage:
+  orange                start reading
+  orange -h, --help     print this help
+  orange -v, --version  print the version
+
+orange takes no configuration. Once it is running, press ? for the keys
+that work in whatever view you are on, and q to quit.
+`
+
+// parseArgs handles the command line before the reader starts. It returns
+// the exit code and whether to go on and start the reader, rather than
+// exiting itself, so that it can be tested.
+func parseArgs(args []string, stdout, stderr io.Writer) (code int, start bool) {
+	if len(args) == 0 {
+		return 0, true
+	}
+	if len(args) > 1 {
+		fmt.Fprintf(stderr, "orange: unexpected argument %q\n\n%s", args[1], usage)
+		return 2, false
+	}
+	switch args[0] {
+	case "--version", "-v", "version":
+		fmt.Fprintln(stdout, "orange "+version)
+		return 0, false
+	case "--help", "-h", "help":
+		fmt.Fprint(stdout, usage)
+		return 0, false
+	default:
+		// Exit 2 for a usage error, as the flag package does, so a script
+		// can tell a bad invocation from a reader that failed to run.
+		fmt.Fprintf(stderr, "orange: unknown argument %q\n\n%s", args[0], usage)
+		return 2, false
+	}
+}
+
 func main() {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "--version", "-v", "version":
-			fmt.Println("orange " + version)
-			return
-		}
+	if code, start := parseArgs(os.Args[1:], os.Stdout, os.Stderr); !start {
+		os.Exit(code)
 	}
 
 	// pkg/browser writes launcher output to stdout/stderr, which would

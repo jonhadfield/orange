@@ -77,7 +77,9 @@ go build -o orange ./cmd/orange
 ## Usage
 
 ```sh
-orange
+orange            # start reading
+orange --help     # the flags, and a pointer at the keys below
+orange --version  # print the version
 ```
 
 ### Keys
