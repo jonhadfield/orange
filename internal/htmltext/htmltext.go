@@ -48,6 +48,11 @@ func convert(src string, linkify bool) string {
 		text := strings.TrimSpace(link.String())
 		var display string
 		switch {
+		case href == "":
+			// No target to show, so the anchor text is all there is. Worth
+			// its own case now that data-href no longer answers a lookup
+			// for href, which would otherwise render as "text ()".
+			display = text
 		case text == "" || text == href || strings.HasSuffix(text, "..."):
 			// HN link text is usually the (possibly truncated) URL itself.
 			display = href
@@ -62,6 +67,12 @@ func convert(src string, linkify bool) string {
 			display = "\x1b[4m\x1b]8;;" + href + "\x1b\\" + display + "\x1b]8;;\x1b\\\x1b[24m"
 		}
 		dst().WriteString(display)
+	}
+
+	flushPre := func() {
+		inPre = false
+		out.WriteString(indent(strings.TrimRight(pre.String(), "\n"), "    "))
+		out.WriteString("\n")
 	}
 
 	s := src
@@ -107,13 +118,22 @@ func convert(src string, linkify bool) string {
 			}
 		case "/pre":
 			if inPre {
-				inPre = false
-				out.WriteString(indent(strings.TrimRight(pre.String(), "\n"), "    "))
-				out.WriteString("\n")
+				flushPre()
 			}
 		case "code", "/code", "b", "/b", "strong", "/strong", "u", "/u":
 			// No terminal representation needed.
 		}
+	}
+
+	// A missing </a> or </pre> must not swallow everything written since the
+	// opening tag: what was collected is rendered as if the tag had closed.
+	// Link first, so its text lands inside an unclosed <pre> rather than
+	// after it.
+	if inLink {
+		flushLink()
+	}
+	if inPre {
+		flushPre()
 	}
 
 	result := out.String()
@@ -123,19 +143,60 @@ func convert(src string, linkify bool) string {
 	return strings.TrimSpace(result)
 }
 
-// attrValue extracts a double-quoted attribute value from a tag's attribute
-// list, e.g. attrValue(`href="https://x"`, "href") == "https://x".
+// attrValue extracts an attribute value from a tag's attribute list, e.g.
+// attrValue(`href="https://x"`, "href") == "https://x". The value may be
+// double-quoted, single-quoted or bare, and the name has to match a whole
+// attribute, so that a lookup for href does not find data-href.
 func attrValue(attrs, name string) string {
-	i := strings.Index(strings.ToLower(attrs), name+`="`)
-	if i < 0 {
+	// Matched in place rather than against a lowercased copy: lowercasing
+	// can change a string's length, which would put the indices out of step
+	// with the original.
+	for i := 0; i+len(name) <= len(attrs); i++ {
+		if !strings.EqualFold(attrs[i:i+len(name)], name) {
+			continue
+		}
+		// Reject the tail of a longer name, so href does not match
+		// data-href.
+		if i > 0 && isAttrNameByte(attrs[i-1]) {
+			continue
+		}
+		// And reject a name that only starts the same way: what follows
+		// has to be the "=" of a value, not more of the name, which is
+		// what separates href from hreflang.
+		rest := strings.TrimLeft(attrs[i+len(name):], " \t\r\n")
+		if !strings.HasPrefix(rest, "=") {
+			continue
+		}
+		return attrText(strings.TrimLeft(rest[1:], " \t\r\n"))
+	}
+	return ""
+}
+
+// attrText reads one attribute value from the start of s. An unterminated
+// quote takes the rest of the tag rather than yielding nothing, on the same
+// grounds as flushing an unclosed tag: salvage what is there.
+func attrText(s string) string {
+	if s == "" {
 		return ""
 	}
-	start := i + len(name) + 2
-	end := strings.IndexByte(attrs[start:], '"')
+	if q := s[0]; q == '"' || q == '\'' {
+		if end := strings.IndexByte(s[1:], q); end >= 0 {
+			return html.UnescapeString(s[1 : 1+end])
+		}
+		return html.UnescapeString(s[1:])
+	}
+	end := strings.IndexAny(s, " \t\r\n")
 	if end < 0 {
-		return ""
+		end = len(s)
 	}
-	return html.UnescapeString(attrs[start : start+end])
+	return html.UnescapeString(s[:end])
+}
+
+// isAttrNameByte reports whether c can appear in an HTML attribute name,
+// which is how a whole-name match is told from the tail of a longer one.
+func isAttrNameByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+		c == '-' || c == '_' || c == ':' || c == '.'
 }
 
 func indent(s, prefix string) string {
