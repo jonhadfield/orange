@@ -1,6 +1,9 @@
 package htmltext
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestConvert(t *testing.T) {
 	tests := []struct {
@@ -280,4 +283,98 @@ func TestCutTagName(t *testing.T) {
 			t.Errorf("cutTagName(%q) = (%q, %q), want (%q, %q)", tt.tag, name, attrs, tt.name, tt.attrs)
 		}
 	}
+}
+
+// TestStripControl covers the characters a terminal acts on rather than
+// displays, and the two whitespace controls the renderer needs kept.
+func TestStripControl(t *testing.T) {
+	tests := []struct{ name, in, want string }{
+		{"escape", "before\x1bafter", "beforeafter"},
+		{"bel ends an OSC string", "a\x07b", "ab"},
+		{"nul", "a\x00b", "ab"},
+		{"del", "a\x7fb", "ab"},
+		{"c1 csi", "a\u009bb", "ab"},
+		{"c1 range start and end", "a\u0080b\u009fc", "abc"},
+		{"a full escape sequence loses its escape", "\x1b[31mred", "[31mred"},
+		{"carriage return goes", "a\rb", "ab"},
+		{"newline stays", "a\nb", "a\nb"},
+		{"tab stays", "a\tb", "a\tb"},
+		{"ordinary text is untouched", "hello, world", "hello, world"},
+		{"non-ascii is untouched", "café — naïve — 日本語 — 🎉", "café — naïve — 日本語 — 🎉"},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := StripControl(tt.in); got != tt.want {
+				t.Errorf("StripControl(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestConvertStripsEscapedControls is the case that matters: HN escapes its
+// HTML, so a control character arrives as an entity and only becomes one
+// after unescaping. Stripping before that would miss it entirely.
+func TestConvertStripsEscapedControls(t *testing.T) {
+	for _, in := range []string{
+		"before&#x1b;[31mafter",
+		"before&#27;[31mafter",
+		"a&#0;b",
+		"<p>text&#x9b;more",
+		`<a href="https://example.com/&#x1b;\\">link</a>`,
+	} {
+		if got := Convert(in); strings.ContainsAny(got, "\x1b\x07\x00") {
+			t.Errorf("Convert(%q) = %q, want no control characters", in, got)
+		}
+	}
+}
+
+// TestConvertLinkedCannotBeBrokenOutOf: href is interpolated straight into
+// an OSC 8 sequence, so an ESC or BEL in it would end the sequence early and
+// let the rest be read as terminal input. The only escapes in the output
+// must be the ones this package wrote.
+func TestConvertLinkedCannotBeBrokenOutOf(t *testing.T) {
+	// The same link with the ESC left out. If the hostile one renders
+	// identically, the ESC contributed nothing.
+	hostile := ConvertLinked(`<a href="https://example.com/&#x1b;&#x5c;evil">click</a>`)
+	benign := ConvertLinked(`<a href="https://example.com/&#x5c;evil">click</a>`)
+	if hostile != benign {
+		t.Errorf("the escape changed the output:\n got: %q\nwant: %q", hostile, benign)
+	}
+
+	// And no more escapes than an ordinary link needs, so the count is
+	// taken from one rather than written down here.
+	plain := ConvertLinked(`<a href="https://example.com/x">click</a>`)
+	if got, want := strings.Count(hostile, "\x1b"), strings.Count(plain, "\x1b"); got != want {
+		t.Errorf("output has %d escapes, want the %d an ordinary link uses:\n%q", got, want, hostile)
+	}
+	if strings.Contains(hostile, "\x07") {
+		t.Errorf("output contains BEL, which ends an OSC string:\n%q", hostile)
+	}
+	// The link target survives, minus the escape.
+	if !strings.Contains(hostile, "https://example.com/") {
+		t.Errorf("the link target was lost entirely:\n%q", hostile)
+	}
+}
+
+// FuzzConvertEmitsNoControls is the lock the issue asks for: whatever goes
+// in, plain Convert never writes a character the terminal would act on.
+func FuzzConvertEmitsNoControls(f *testing.F) {
+	for _, seed := range []string{
+		"", "plain text", "<p>one<p>two", "<i>x</i>", "a &amp; b",
+		"&#x1b;[31m", "\x1bliteral", "<a href=\"&#7;\">t</a>",
+		"<pre><code>x := 1", "<a href='x", "&#x9b;", "\x00\x01\x02",
+		"<a\nhref=\"&#27;\">t</a>", "&#xfeff;", "\u0080\u009f",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, in string) {
+		out := Convert(in)
+		for i, r := range out {
+			if isControl(r) {
+				t.Errorf("Convert(%q) emitted %#U at byte %d:\n%q", in, r, i, out)
+				break
+			}
+		}
+	})
 }

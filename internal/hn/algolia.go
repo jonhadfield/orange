@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/jonhadfield/orange/internal/htmltext"
 )
 
 // DefaultAlgoliaURL is the HN Algolia search API endpoint.
@@ -65,7 +67,7 @@ func (c *Client) PastDiscussions(ctx context.Context, storyURL string, excludeID
 		}
 		out = append(out, PastDiscussion{
 			ID:       id,
-			Title:    h.Title,
+			Title:    htmltext.StripControl(h.Title),
 			Points:   h.Points,
 			Comments: h.NumComments,
 			Time:     h.CreatedAtI,
@@ -210,6 +212,7 @@ func (n algoliaNode) item() Item {
 	for _, ch := range n.Children {
 		it.Kids = append(it.Kids, ch.ID)
 	}
+	it.sanitize()
 	return it
 }
 
