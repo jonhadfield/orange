@@ -10,19 +10,32 @@ permissions:
 
 jobs:
   test:
+    name: test (${{ matrix.label }})
     runs-on: ubuntu-latest
+    strategy:
+      # A break on one Go version must not cancel the answer from the other.
+      fail-fast: false
+      matrix:
+        include:
+          # The version this module targets, and the one the release is built
+          # with. This leg is the contract.
+          - label: go.mod
+            version_file: go.mod
+          # The newest release, so a Go that breaks this code is heard about
+          # here rather than from someone running it. Both legs are required:
+          # unlike the lint job below, a failure here says something about
+          # this code rather than about a tool that cannot read a newer
+          # standard library, and that is worth being stopped by.
+          - label: stable
+            version: stable
     steps:
       - uses: actions/checkout@v4
 
-      # go.mod is the single source of truth for the Go version, rather
-      # than "stable": golangci-lint cannot typecheck a standard library
-      # newer than the Go it was built with, so a "stable" that rolls
-      # forward breaks the lint job on a release that has nothing to do
-      # with this module. Bumping the go directive is now the deliberate
-      # moment to check the linter pin below still keeps up.
+      # Exactly one of these is set per leg; setup-go ignores the empty one.
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: ${{ matrix.version_file }}
+          go-version: ${{ matrix.version }}
 
       - name: Check formatting
         run: |
@@ -46,8 +59,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # See the note in the test job: the Go version comes from go.mod so it
-      # cannot roll ahead of what this linter build is able to typecheck.
+      # Pinned to go.mod, and deliberately not matrixed the way the test job
+      # is: golangci-lint cannot typecheck a standard library newer than the
+      # Go it was built with, so pointing it at "stable" fails inside the
+      # standard library on a release that has nothing to do with this
+      # module. Bumping the go directive is the deliberate moment to check
+      # the linter pin below still keeps up.
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
