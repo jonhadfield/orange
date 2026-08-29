@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 )
@@ -224,4 +225,107 @@ func equal(a, b []int) bool {
 		}
 	}
 	return true
+}
+
+// TestCacheEvictsLeastRecentlyUsed: the cache used to keep everything it had
+// ever seen, so a reader left running all day grew without limit. It is now
+// bounded, and what goes first is what has been left alone longest.
+func TestCacheEvictsLeastRecentlyUsed(t *testing.T) {
+	c := NewClient("http://unused.invalid")
+	c.cacheMax = 3
+
+	for id := 1; id <= 3; id++ {
+		c.store(id, Item{ID: id, Type: "story"})
+	}
+	if got := c.cacheLen(); got != 3 {
+		t.Fatalf("cache holds %d, want 3", got)
+	}
+
+	// Touching 1 makes 2 the oldest, so adding 4 must drop 2, not 1.
+	if _, ok := c.cached(1); !ok {
+		t.Fatal("item 1 is not cached")
+	}
+	c.store(4, Item{ID: 4, Type: "story"})
+
+	if got := c.cacheLen(); got != 3 {
+		t.Errorf("cache holds %d after exceeding the limit, want 3", got)
+	}
+	if _, ok := c.cached(2); ok {
+		t.Error("item 2 survived, want the least recently used one evicted")
+	}
+	for _, id := range []int{1, 3, 4} {
+		if _, ok := c.cached(id); !ok {
+			t.Errorf("item %d was evicted, want it kept", id)
+		}
+	}
+}
+
+// TestCacheDoesNotGrowOnRepeatedStores: refreshing an item already held has
+// to replace it rather than add a second copy, or a feed on a refresh timer
+// would fill the cache with one story.
+func TestCacheDoesNotGrowOnRepeatedStores(t *testing.T) {
+	c := NewClient("http://unused.invalid")
+	for range 100 {
+		c.store(7, Item{ID: 7, Title: "latest"})
+	}
+	if got := c.cacheLen(); got != 1 {
+		t.Errorf("cache holds %d entries after 100 stores of one item, want 1", got)
+	}
+	it, ok := c.cached(7)
+	if !ok || it.Title != "latest" {
+		t.Errorf("cached item = %+v, %v, want the newest version", it, ok)
+	}
+}
+
+// TestCacheStaysWithinItsLimit is the property the issue is about: however
+// much goes in, the cache does not keep growing.
+func TestCacheStaysWithinItsLimit(t *testing.T) {
+	c := NewClient("http://unused.invalid")
+	c.cacheMax = 50
+	for id := range 5000 {
+		c.store(id, Item{ID: id, Text: "a comment body"})
+		if got := c.cacheLen(); got > c.cacheMax {
+			t.Fatalf("cache grew to %d, over its limit of %d", got, c.cacheMax)
+		}
+	}
+	if got := c.cacheLen(); got != 50 {
+		t.Errorf("cache holds %d at the end, want it full at 50", got)
+	}
+}
+
+// TestDefaultCacheSizeCoversASession: the cap only exists to bound a very
+// long run, so it has to sit well above what one session actually touches —
+// six feeds of 500 stories plus several large threads.
+func TestDefaultCacheSizeCoversASession(t *testing.T) {
+	const feeds, storiesPerFeed, threads, commentsPerThread = 6, 500, 4, 2500
+	session := feeds*storiesPerFeed + threads*commentsPerThread
+	if defaultCacheSize <= session {
+		t.Errorf("defaultCacheSize = %d, want more than a session's %d items",
+			defaultCacheSize, session)
+	}
+}
+
+// TestCacheConcurrentAccess runs under -race: items are fetched on several
+// goroutines, so the LRU bookkeeping is reached concurrently.
+func TestCacheConcurrentAccess(t *testing.T) {
+	c := NewClient("http://unused.invalid")
+	c.cacheMax = 20
+
+	var wg sync.WaitGroup
+	for g := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range 200 {
+				id := g*200 + i
+				c.store(id, Item{ID: id})
+				c.cached(id)
+				c.cached(id / 2)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := c.cacheLen(); got > 20 {
+		t.Errorf("cache holds %d, over its limit of 20", got)
+	}
 }
