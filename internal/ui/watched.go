@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -60,7 +61,7 @@ func (m watchedModel) start() (watchedModel, tea.Cmd) {
 	m.err = nil
 	m.rows = nil
 	if m.st == nil {
-		m.err = fmt.Errorf("watch list unavailable (state file could not be opened)")
+		m.err = errors.New(storeUnavailable("watch list"))
 		return m, nil
 	}
 	states := m.st.All()

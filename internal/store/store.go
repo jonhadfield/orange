@@ -3,6 +3,7 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -21,32 +22,75 @@ type WatchState struct {
 // Store is a JSON-file-backed watch list, safe for concurrent use.
 type Store struct {
 	path string
+	// where an unparseable file was moved to at Open, empty if there was
+	// nothing wrong with it
+	corrupt string
 
 	mu      sync.Mutex
 	watched map[int]WatchState
 }
 
+// DefaultPath is where the watch list lives when Open is given no path.
+func DefaultPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "orange", "watched.json"), nil
+}
+
 // Open loads the store at path, or the default per-user location when path
-// is empty. A missing file yields an empty store.
+// is empty. A missing file yields an empty store, and so does an unreadable
+// one: see setAside. Recovered reports the latter.
 func Open(path string) (*Store, error) {
 	if path == "" {
-		dir, err := os.UserConfigDir()
+		p, err := DefaultPath()
 		if err != nil {
 			return nil, err
 		}
-		path = filepath.Join(dir, "orange", "watched.json")
+		path = p
 	}
 	s := &Store{path: path, watched: map[int]WatchState{}}
 	b, err := os.ReadFile(path)
 	switch {
 	case err == nil:
+		// An empty file is not corrupt, just nothing written yet, and is
+		// not worth setting aside.
+		if len(bytes.TrimSpace(b)) == 0 {
+			return s, nil
+		}
 		if err := json.Unmarshal(b, &s.watched); err != nil {
-			return nil, err
+			if err := s.setAside(); err != nil {
+				return nil, err
+			}
 		}
 	case !os.IsNotExist(err):
 		return nil, err
 	}
 	return s, nil
+}
+
+// setAside moves an unparseable state file out of the way, so that watching
+// works on this run and every later one instead of staying dead until
+// somebody deletes the file by hand. The old contents are kept alongside,
+// where they can still be looked at. A previous .corrupt file is replaced,
+// the newer one being the more useful of the two.
+func (s *Store) setAside() error {
+	// Unmarshal can populate part of the map before failing, so the list
+	// starts again rather than carrying half a file forward.
+	s.watched = map[int]WatchState{}
+	moved := s.path + ".corrupt"
+	if err := os.Rename(s.path, moved); err != nil {
+		return err
+	}
+	s.corrupt = moved
+	return nil
+}
+
+// Recovered reports whether Open found an unparseable state file, and where
+// it was moved to. The watch list started empty when it did.
+func (s *Store) Recovered() (movedTo string, ok bool) {
+	return s.corrupt, s.corrupt != ""
 }
 
 // save rewrites the store atomically: a crash or a full disk mid-write leaves
