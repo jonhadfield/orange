@@ -1,6 +1,7 @@
 package hn
 
 import (
+	"container/list"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -37,8 +38,24 @@ func (e *PartialError) Error() string {
 
 func (e *PartialError) Unwrap() error { return e.Err }
 
+// defaultCacheSize is how many items the client keeps. Measured against a
+// simulated day of use, an entry costs about a kilobyte — comment bodies
+// dominate it — so this is a ceiling of roughly 20MB. It is far above any
+// plausible working set: six feeds of 500 stories and several 2,500-comment
+// threads together come to well under half of it, so the cache still never
+// misses within a session; the cap only stops a reader left running for days
+// from growing without limit.
+const defaultCacheSize = 20000
+
+// cacheEntry is one item and its key, so eviction can find the map entry
+// from the list element.
+type cacheEntry struct {
+	id   int
+	item Item
+}
+
 // Client fetches feeds and items from the Hacker News API, caching items
-// in memory for the lifetime of the process.
+// in memory. The cache is a bounded LRU: see defaultCacheSize.
 type Client struct {
 	baseURL    string
 	algoliaURL string
@@ -47,7 +64,10 @@ type Client struct {
 	httpClient *http.Client
 
 	mu    sync.Mutex
-	cache map[int]Item
+	cache map[int]*list.Element
+	// most recently used at the front, so the back is what goes first
+	lru      *list.List
+	cacheMax int
 }
 
 // Option configures a Client.
@@ -78,7 +98,9 @@ func NewClient(baseURL string, opts ...Option) *Client {
 		userAgent:  DefaultUserAgent,
 		retryBase:  100 * time.Millisecond,
 		httpClient: &http.Client{Timeout: 15 * time.Second, Transport: tr},
-		cache:      make(map[int]Item),
+		cache:      make(map[int]*list.Element),
+		lru:        list.New(),
+		cacheMax:   defaultCacheSize,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -167,12 +189,9 @@ func (c *Client) Item(ctx context.Context, id int) (Item, error) {
 
 func (c *Client) item(ctx context.Context, id int, fresh bool) (Item, error) {
 	if !fresh {
-		c.mu.Lock()
-		if it, ok := c.cache[id]; ok {
-			c.mu.Unlock()
+		if it, ok := c.cached(id); ok {
 			return it, nil
 		}
-		c.mu.Unlock()
 	}
 
 	var it Item
@@ -184,10 +203,49 @@ func (c *Client) item(ctx context.Context, id int, fresh bool) (Item, error) {
 	if it.ID == 0 {
 		return Item{}, fmt.Errorf("hn: item %d not found", id)
 	}
-	c.mu.Lock()
-	c.cache[id] = it
-	c.mu.Unlock()
+	c.store(id, it)
 	return it, nil
+}
+
+// cacheLen is the number of items held, for tests.
+func (c *Client) cacheLen() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lru.Len()
+}
+
+// cached returns a cached item, counting the read as a use so that what is
+// being looked at is not what gets evicted.
+func (c *Client) cached(id int) (Item, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	el, ok := c.cache[id]
+	if !ok {
+		return Item{}, false
+	}
+	c.lru.MoveToFront(el)
+	return el.Value.(*cacheEntry).item, true
+}
+
+// store adds or refreshes an item, dropping the least recently used ones
+// once the cache is over its limit.
+func (c *Client) store(id int, it Item) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if el, ok := c.cache[id]; ok {
+		el.Value.(*cacheEntry).item = it
+		c.lru.MoveToFront(el)
+		return
+	}
+	c.cache[id] = c.lru.PushFront(&cacheEntry{id: id, item: it})
+	for c.lru.Len() > c.cacheMax {
+		oldest := c.lru.Back()
+		if oldest == nil {
+			break
+		}
+		c.lru.Remove(oldest)
+		delete(c.cache, oldest.Value.(*cacheEntry).id)
+	}
 }
 
 // Items fetches the given items concurrently, preserving the order of ids.
