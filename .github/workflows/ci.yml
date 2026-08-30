@@ -22,12 +22,17 @@ jobs:
           - label: go.mod
             version_file: go.mod
           # The newest release, so a Go that breaks this code is heard about
-          # here rather than from someone running it. Both legs are required:
-          # unlike the lint job below, a failure here says something about
-          # this code rather than about a tool that cannot read a newer
-          # standard library, and that is worth being stopped by.
+          # here rather than from someone running it. Advisory: a Go release
+          # lands without anyone here doing anything, and it should not be
+          # able to block an unrelated change on the day it ships. The
+          # failure still has to be looked at — it says something about this
+          # code, unlike a lint break, which is about a tool that cannot read
+          # a newer standard library.
           - label: stable
             version: stable
+            optional: true
+    # Only the leg marked optional above; the go.mod leg stays blocking.
+    continue-on-error: ${{ matrix.optional == true }}
     steps:
       - uses: actions/checkout@v4
 
