@@ -54,6 +54,24 @@ func parseArgs(args []string, stdout, stderr io.Writer) (code int, start bool) {
 	}
 }
 
+// openStore loads the watch list, or explains why it could not and returns
+// nil, which disables watching while leaving the rest of the reader working.
+// Nothing here can stop orange starting: the store failing is a reason to
+// read without watching, not a reason not to read.
+//
+// The warning goes out before the alternate screen takes over, so in
+// practice it scrolls past unseen; ui.New says it again on the first frame
+// where it will actually be read. This line is for the scrollback and for
+// anyone running orange from a script.
+func openStore(path string, stderr io.Writer) *store.Store {
+	st, err := store.Open(path)
+	if err != nil {
+		fmt.Fprintln(stderr, "orange: watch state unavailable:", err)
+		return nil
+	}
+	return st
+}
+
 func main() {
 	if code, start := parseArgs(os.Args[1:], os.Stdout, os.Stderr); !start {
 		os.Exit(code)
@@ -66,15 +84,9 @@ func main() {
 
 	client := hn.NewClient("", hn.WithUserAgent(
 		"orange/"+version+" (+https://github.com/jonhadfield/orange)"))
-	st, err := store.Open("")
-	if err != nil {
-		// Watching is disabled but the reader still works.
-		fmt.Fprintln(os.Stderr, "orange: watch state unavailable:", err)
-		st = nil
-	}
 	// The alternate screen is declared by the model's View in Bubble Tea v2,
 	// so it is no longer a program option here.
-	p := tea.NewProgram(ui.New(client, st))
+	p := tea.NewProgram(ui.New(client, openStore("", os.Stderr)))
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "orange:", err)
 		os.Exit(1)
