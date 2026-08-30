@@ -38,14 +38,17 @@ func (e *PartialError) Error() string {
 
 func (e *PartialError) Unwrap() error { return e.Err }
 
-// defaultCacheSize is how many items the client keeps. Measured against a
-// simulated day of use, an entry costs about a kilobyte — comment bodies
-// dominate it — so this is a ceiling of roughly 20MB. It is far above any
-// plausible working set: six feeds of 500 stories and several 2,500-comment
-// threads together come to well under half of it, so the cache still never
-// misses within a session; the cap only stops a reader left running for days
-// from growing without limit.
-const defaultCacheSize = 20000
+// defaultCacheSize is how many items the client keeps. An entry costs about
+// a kilobyte, comment bodies dominating it, so this is a ceiling of roughly
+// 47MB — reached only by a reader left running for a very long time.
+//
+// The cap costs nothing until it is reached: the cache holds what has
+// actually been fetched, not this many entries, so a short session uses a
+// few MB whatever this number says. That is why it is generous. Six feeds
+// of 500 stories and four 2,500-comment threads come to 13,000, so a
+// session still never misses on something it has already loaded, with room
+// for a reader who opens far more than that.
+const defaultCacheSize = 50000
 
 // cacheEntry is one item and its key, so eviction can find the map entry
 // from the list element.
