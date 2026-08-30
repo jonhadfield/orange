@@ -26,6 +26,7 @@ type PastDiscussion struct {
 type algoliaHit struct {
 	ObjectID    string `json:"objectID"`
 	Title       string `json:"title"`
+	Author      string `json:"author"`
 	URL         string `json:"url"`
 	Points      int    `json:"points"`
 	NumComments int    `json:"num_comments"`
@@ -146,6 +147,49 @@ func canonicalQuery(q url.Values) string {
 		sort.Strings(vs)
 	}
 	return q.Encode()
+}
+
+// SearchLimit is how many stories a search returns. Algolia ranks by
+// relevance, so the tail of a long list is rarely worth the reading.
+const SearchLimit = 30
+
+// Search finds stories matching the query, most relevant first. Comments are
+// excluded: a search that returns replies out of their threads gives the
+// reader something they cannot act on.
+func (c *Client) Search(ctx context.Context, query string) ([]Item, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, nil
+	}
+	q := url.Values{
+		"query":       {query},
+		"tags":        {"story"},
+		"hitsPerPage": {strconv.Itoa(SearchLimit)},
+	}
+	var resp algoliaResponse
+	if err := c.getURL(ctx, c.algoliaURL+"/search?"+q.Encode(), &resp); err != nil {
+		return nil, err
+	}
+	out := make([]Item, 0, len(resp.Hits))
+	for _, h := range resp.Hits {
+		id, err := strconv.Atoi(h.ObjectID)
+		if err != nil {
+			continue
+		}
+		it := Item{
+			ID:          id,
+			Type:        "story",
+			Title:       h.Title,
+			By:          h.Author,
+			URL:         h.URL,
+			Score:       h.Points,
+			Descendants: h.NumComments,
+			Time:        h.CreatedAtI,
+		}
+		it.sanitize()
+		out = append(out, it)
+	}
+	return out, nil
 }
 
 // algoliaNode is one item in Algolia's nested item tree. Absent fields come
