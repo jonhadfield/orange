@@ -193,12 +193,13 @@ func (m Model) viewBindings() (short, full []key.Binding) {
 		short = []key.Binding{
 			move,
 			with(k.Open, "enter/l", "open"),
+			with(k.NextFeed, "tab", "stories/comments"),
 			with(k.Filter, "/", "new search"),
-			with(k.Watch, "w", "watch"),
 			back, k.Help, k.Quit,
 		}
 		full = []key.Binding{
 			move, jump, scroll, with(k.Open, "enter/l", "open story"),
+			with(k.NextFeed, "tab", "search stories or comments"),
 			with(k.Filter, "/", "new search"),
 			with(k.OpenURL, "o", "open link"),
 			with(k.OpenHN, "c", "open HN page"),

@@ -176,8 +176,13 @@ func TestSearchEmptyAndInitialStatesExplainThemselves(t *testing.T) {
 	empty := newSearchModel(nil, newKeyMap())
 	empty.setSize(100, 24)
 	empty.query = "nothingmatchesthis"
-	if view := stripStyles(empty.View()); !strings.Contains(view, "nothing matched") {
+	view := stripStyles(empty.View())
+	if !strings.Contains(view, "no stories matched") {
 		t.Errorf("an empty result set is not explained:\n%s", view)
+	}
+	// And it points at the other half of the search rather than dead-ending.
+	if !strings.Contains(view, "tab") {
+		t.Errorf("an empty result set does not offer the other mode:\n%s", view)
 	}
 }
 
@@ -264,5 +269,181 @@ func TestEnterOpensASearchResult(t *testing.T) {
 	back, _ := root.Update(keyPress("esc"))
 	if got := back.(Model).view; got != viewSearch {
 		t.Errorf("esc from the story went to %v, want back to the search", got)
+	}
+}
+
+func comment(id, storyID int, text, story string) hn.CommentResult {
+	return hn.CommentResult{
+		ID: id, Author: "someone", Text: text,
+		StoryID: storyID, StoryTitle: story, Time: 1,
+	}
+}
+
+// TestSearchTabSwitchesWhatIsSearched: tab changes what the query is
+// matched against, the way it changes which feed is shown on the story
+// list, and re-runs the search rather than leaving the old answer up.
+func TestSearchTabSwitchesWhatIsSearched(t *testing.T) {
+	m := searchWith(result(1, "A story"))
+	if m.mode != searchStories {
+		t.Fatal("search did not start on stories")
+	}
+
+	m, cmd := m.handleKey(keyPress("tab"))
+	if m.mode != searchComments {
+		t.Error("tab did not switch to comments")
+	}
+	if cmd == nil {
+		t.Error("tab did not re-run the query in the new mode")
+	}
+	// The old answers must go: they are the wrong kind now.
+	if len(m.results) != 0 {
+		t.Errorf("story results survived the switch: %+v", m.results)
+	}
+
+	m, _ = m.handleKey(keyPress("tab"))
+	if m.mode != searchStories {
+		t.Error("tab did not switch back to stories")
+	}
+}
+
+// TestSearchTabWithoutAQueryDoesNotSearch: tab before anything has been
+// typed changes the mode and nothing else.
+func TestSearchTabWithoutAQueryDoesNotSearch(t *testing.T) {
+	m := newSearchModel(nil, newKeyMap())
+	m.setSize(100, 24)
+	m, cmd := m.handleKey(keyPress("tab"))
+	if m.mode != searchComments {
+		t.Error("tab did not switch mode")
+	}
+	if cmd != nil {
+		t.Error("tab searched for nothing")
+	}
+}
+
+// TestCommentResultOpensItsThread is the decision the feature rests on: a
+// comment on its own is a reply with nothing around it, so what a row
+// offers to open is the story it was written under.
+func TestCommentResultOpensItsThread(t *testing.T) {
+	m := searchWith()
+	m.mode = searchComments
+	m.comments = []hn.CommentResult{
+		comment(500, 100, "<p>SQLite is lovely", "A story about databases"),
+		comment(501, 200, "<p>another", "A different story"),
+	}
+
+	it, ok := m.selected()
+	if !ok {
+		t.Fatal("no comment selected")
+	}
+	if it.ID != 100 {
+		t.Errorf("selected item is %d, want the story 100 rather than the comment", it.ID)
+	}
+	if it.Title != "A story about databases" {
+		t.Errorf("title = %q, want the story's", it.Title)
+	}
+
+	m, _ = m.handleKey(keyPress("j"))
+	if it, _ := m.selected(); it.ID != 200 {
+		t.Errorf("after j the item is %d, want story 200", it.ID)
+	}
+}
+
+// TestCommentRowsShowTheCommentAndItsThread: a comment has no title, so
+// the text is the line to read, with the story underneath.
+func TestCommentRowsShowTheCommentAndItsThread(t *testing.T) {
+	m := searchWith()
+	m.mode = searchComments
+	m.query = "sqlite"
+	m.comments = []hn.CommentResult{
+		comment(500, 100, "<p>SQLite is <i>lovely</i> and fast", "A story about databases"),
+	}
+
+	view := stripStyles(m.View())
+	// The HTML is rendered, not shown raw.
+	if strings.Contains(view, "<p>") || strings.Contains(view, "<i>") {
+		t.Errorf("the comment HTML was not rendered:\n%s", view)
+	}
+	if !strings.Contains(view, "SQLite is _lovely_ and fast") {
+		t.Errorf("the comment text is not shown:\n%s", view)
+	}
+	if !strings.Contains(view, "in A story about databases") {
+		t.Errorf("the row does not say which thread it came from:\n%s", view)
+	}
+	if !strings.Contains(view, "in comments") {
+		t.Errorf("the header does not say what was searched:\n%s", view)
+	}
+}
+
+// TestSearchIgnoresAResultForTheOtherMode: switching mode while a search is
+// in flight must not land the wrong kind of answer.
+func TestSearchIgnoresAResultForTheOtherMode(t *testing.T) {
+	m := searchWith()
+	m.query, m.mode = "sqlite", searchComments
+
+	m, _ = m.Update(searchResultsMsg{
+		query: "sqlite", mode: searchStories, items: []hn.Item{result(1, "A story")},
+	})
+	if len(m.results) != 0 {
+		t.Errorf("a story result landed while searching comments: %+v", m.results)
+	}
+}
+
+// TestCommentWithNoTextStillRenders: a comment stripped to nothing must not
+// leave a blank row with no explanation.
+func TestCommentWithNoTextStillRenders(t *testing.T) {
+	m := searchWith()
+	m.mode, m.query = searchComments, "x"
+	m.comments = []hn.CommentResult{comment(1, 2, "", "The story")}
+	if view := stripStyles(m.View()); !strings.Contains(view, "(no text)") {
+		t.Errorf("an empty comment renders as a blank row:\n%s", view)
+	}
+}
+
+// TestOpeningACommentFetchesItsStory: the search result carries only the
+// story's id and title, so opening it directly would show a header with no
+// author, no score and an age of 1970. It has to be fetched first.
+func TestOpeningACommentFetchesItsStory(t *testing.T) {
+	m := newTestModel(t)
+	m.view = viewSearch
+	m.search = searchWith()
+	m.search.mode = searchComments
+	m.search.comments = []hn.CommentResult{
+		comment(500, 100, "<p>text", "A story about databases"),
+	}
+
+	next, cmd := m.Update(keyPress("enter"))
+	root := next.(Model)
+
+	// The view does not change until the story arrives.
+	if root.view != viewSearch {
+		t.Errorf("view = %v, want it to wait on the search until the story loads", root.view)
+	}
+	if cmd == nil {
+		t.Fatal("enter produced no command, so nothing was fetched")
+	}
+	msg := cmd()
+	open, ok := msg.(openItemMsg)
+	if !ok {
+		t.Fatalf("enter produced %T, want an openItemMsg asking for the story", msg)
+	}
+	if open.id != 100 {
+		t.Errorf("fetching story %d, want 100", open.id)
+	}
+	// And coming back from that story returns to the search.
+	if root.prevView != viewSearch {
+		t.Errorf("prevView = %v, want the search to be returned to", root.prevView)
+	}
+}
+
+// TestOpeningAStoryResultDoesNotFetch: a story result is already whole, so
+// it opens without a round trip.
+func TestOpeningAStoryResultDoesNotFetch(t *testing.T) {
+	m := newTestModel(t)
+	m.view = viewSearch
+	m.search = searchWith(result(7, "A found story"))
+
+	next, _ := m.Update(keyPress("enter"))
+	if got := next.(Model).view; got != viewStory {
+		t.Errorf("view = %v, want the story opened directly", got)
 	}
 }

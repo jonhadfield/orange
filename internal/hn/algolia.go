@@ -27,6 +27,9 @@ type algoliaHit struct {
 	ObjectID    string `json:"objectID"`
 	Title       string `json:"title"`
 	Author      string `json:"author"`
+	CommentText string `json:"comment_text"`
+	StoryID     int    `json:"story_id"`
+	StoryTitle  string `json:"story_title"`
 	URL         string `json:"url"`
 	Points      int    `json:"points"`
 	NumComments int    `json:"num_comments"`
@@ -188,6 +191,56 @@ func (c *Client) Search(ctx context.Context, query string) ([]Item, error) {
 		}
 		it.sanitize()
 		out = append(out, it)
+	}
+	return out, nil
+}
+
+// CommentResult is a comment that matched a search. A comment on its own
+// is not much use, so it carries the story it was written under: that is
+// what the reader is offered to open.
+type CommentResult struct {
+	ID         int
+	Author     string
+	Text       string // HTML, as the API serves it
+	StoryID    int
+	StoryTitle string
+	Time       int64
+}
+
+// SearchComments finds comments matching the query, most relevant first.
+func (c *Client) SearchComments(ctx context.Context, query string) ([]CommentResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, nil
+	}
+	q := url.Values{
+		"query":       {query},
+		"tags":        {"comment"},
+		"hitsPerPage": {strconv.Itoa(SearchLimit)},
+	}
+	var resp algoliaResponse
+	if err := c.getURL(ctx, c.algoliaURL+"/search?"+q.Encode(), &resp); err != nil {
+		return nil, err
+	}
+	out := make([]CommentResult, 0, len(resp.Hits))
+	for _, h := range resp.Hits {
+		id, err := strconv.Atoi(h.ObjectID)
+		if err != nil {
+			continue
+		}
+		// A comment whose story is unknown cannot be opened, so it is not
+		// worth offering.
+		if h.StoryID == 0 {
+			continue
+		}
+		out = append(out, CommentResult{
+			ID:         id,
+			Author:     htmltext.StripControl(h.Author),
+			Text:       htmltext.StripControl(h.CommentText),
+			StoryID:    h.StoryID,
+			StoryTitle: htmltext.StripControl(h.StoryTitle),
+			Time:       h.CreatedAtI,
+		})
 	}
 	return out, nil
 }

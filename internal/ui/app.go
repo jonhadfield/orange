@@ -279,6 +279,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.toggleWatch()
 
 	case key.Matches(msg, m.keys.Open) && (m.view == viewFeeds || m.view == viewPulse || m.view == viewWatched || m.view == viewSearch):
+		// A comment result knows only which story it was written under, so
+		// the story is fetched before it is opened. Opening the stub would
+		// show a header with no author, no score and no age.
+		if id, ok := m.search.openTarget(); ok && m.view == viewSearch {
+			m.prevView = viewSearch
+			return m, func() tea.Msg { return openItemMsg{id: id} }
+		}
 		if it, ok := m.current(); ok {
 			return m.openStory(it, m.view)
 		}
