@@ -30,6 +30,14 @@ func ConvertLinked(src string) string {
 //
 // Tab and newline are kept, since the rendering relies on them. Carriage
 // return is not: it would move the cursor back over what has been written.
+//
+// The bidirectional overrides — U+202A to U+202E and U+2066 to U+2069 — are
+// deliberately left alone. They can make a title read differently from what
+// it is, but they are also how Arabic and Hebrew are written correctly, and
+// removing them would corrupt that text for every reader. They are a
+// spoofing concern rather than a terminal-control one: nothing here obeys
+// them as an instruction. Decided rather than overlooked; do not add them
+// without reopening that.
 func StripControl(s string) string {
 	if !strings.ContainsFunc(s, isControl) {
 		return s
