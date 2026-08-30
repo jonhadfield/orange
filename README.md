@@ -23,6 +23,8 @@ orange knows the history and the momentum of a story, not just its snapshot:
   comments posted since you last read it and marks each new one in the tree
 - **Who is hiring?** (`H`) — finds the latest monthly hiring thread and lets
   you filter job posts by keyword (`/ remote golang`)
+- **Search** (`/`) — find stories by keyword across all of Hacker News, not
+  just the feed you are looking at, ranked by relevance
 
 And the fundamentals:
 
@@ -96,6 +98,7 @@ orange --version  # print the version
 | Mouse wheel / trackpad | Scroll; the selection follows              |
 | `tab` / `shift+tab` | Next / previous feed                          |
 | `1`–`6`             | Jump straight to a feed (on the story list)   |
+| `/`                 | Search stories by keyword                     |
 | `enter` / `l`       | Open story; in a thread, fold/unfold comment  |
 | `1`–`5` (in thread) | Open a past discussion of the same link       |
 | `o`                 | Open the story link in your browser           |

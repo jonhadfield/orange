@@ -13,12 +13,12 @@ import (
 	"github.com/jonhadfield/orange/internal/store"
 )
 
-var allViews = []view{viewFeeds, viewStory, viewPulse, viewWatched, viewHiring}
+var allViews = []view{viewFeeds, viewStory, viewPulse, viewWatched, viewHiring, viewSearch}
 
 func viewName(v view) string {
 	return map[view]string{
 		viewFeeds: "feeds", viewStory: "story", viewPulse: "pulse",
-		viewWatched: "watched", viewHiring: "hiring",
+		viewWatched: "watched", viewHiring: "hiring", viewSearch: "search",
 	}[v]
 }
 
@@ -62,6 +62,15 @@ func filledModel(t *testing.T, w, h int, v view) Model {
 		})
 	}
 	(&m.hiring).recompute()
+
+	m.search.query = "something"
+	for i := 1; i <= 30; i++ {
+		m.search.results = append(m.search.results, hn.Item{
+			ID: i, Type: "story", By: "someone", Score: 100 + i, Descendants: 12,
+			Title: fmt.Sprintf("A matching story %d with a reasonably long headline", i),
+			URL:   "https://example.com/a/b",
+		})
+	}
 
 	m.view = v
 	(&m).applyLayout()
@@ -190,6 +199,8 @@ func TestHelpOffersOnlyWhatTheViewHandles(t *testing.T) {
 		// Watching is not offered for individual job posts ("W watched
 		// stories" is the destination view, which does work here).
 		viewHiring: {"watch/unwatch", "unwatch", "feed"},
+		// Search has its own query line, not a feed to switch.
+		viewSearch: {"feed"},
 	}
 	for v, keys := range absent {
 		m := filledModel(t, 200, 40, v)

@@ -180,11 +180,40 @@ func (m Model) viewBindings() (short, full []key.Binding) {
 		}
 		return short, full
 
+	case viewSearch:
+		if m.search.capturing() {
+			// The query line has the keyboard until it is run or left.
+			short = []key.Binding{
+				hint("type", "a query"),
+				hint("enter", "search"),
+				hint("esc", "cancel"),
+			}
+			return short, short
+		}
+		short = []key.Binding{
+			move,
+			with(k.Open, "enter/l", "open"),
+			with(k.Filter, "/", "new search"),
+			with(k.Watch, "w", "watch"),
+			back, k.Help, k.Quit,
+		}
+		full = []key.Binding{
+			move, jump, scroll, with(k.Open, "enter/l", "open story"),
+			with(k.Filter, "/", "new search"),
+			with(k.OpenURL, "o", "open link"),
+			with(k.OpenHN, "c", "open HN page"),
+			with(k.Watch, "w", "watch/unwatch"),
+			with(k.Refresh, "r", "search again"),
+			k.Pulse, k.Hiring, k.Watched, back, k.Help, k.Quit,
+		}
+		return short, full
+
 	default: // the story list
 		short = []key.Binding{
 			move,
 			with(k.Open, "enter/l", "open"),
 			with(k.NextFeed, "tab/1-6", "feed"),
+			with(k.Filter, "/", "search"),
 			with(k.Watch, "w", "watch"),
 			k.Help, k.Quit,
 		}
@@ -193,6 +222,7 @@ func (m Model) viewBindings() (short, full []key.Binding) {
 			with(k.NextFeed, "tab", "next feed"),
 			with(k.PrevFeed, "shift+tab", "previous feed"),
 			hint("1-6", "jump to feed"),
+			with(k.Filter, "/", "search stories"),
 			k.Refresh,
 			with(k.OpenURL, "o", "open link"),
 			with(k.OpenHN, "c", "open HN page"),

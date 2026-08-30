@@ -30,6 +30,7 @@ const (
 	viewPulse
 	viewWatched
 	viewHiring
+	viewSearch
 )
 
 type browserOpenedMsg struct{ err error }
@@ -50,6 +51,7 @@ type Model struct {
 	pulse    pulseModel
 	watched  watchedModel
 	hiring   hiringModel
+	search   searchModel
 	view     view
 	prevView view // where esc from the story view returns to
 	width    int
@@ -74,6 +76,7 @@ func New(client *hn.Client, st *store.Store) Model {
 		pulse:   newPulseModel(client, keys),
 		watched: newWatchedModel(client, st, keys),
 		hiring:  newHiringModel(client, keys),
+		search:  newSearchModel(client, keys),
 	}
 	// A warning printed before the alternate screen takes over scrolls past
 	// unseen, so a state file that had to be set aside is said here instead.
@@ -211,6 +214,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.hiring, cmd = m.hiring.Update(msg)
 		return m, cmd
 	}
+	// As does the search query line.
+	if m.view == viewSearch && m.search.capturing() {
+		var cmd tea.Cmd
+		m.search, cmd = m.search.Update(msg)
+		return m, cmd
+	}
 
 	m.notice = ""
 	switch {
@@ -235,10 +244,16 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		switch m.view {
 		case viewStory:
 			m.view = m.prevView
-		case viewPulse, viewWatched, viewHiring:
+		case viewPulse, viewWatched, viewHiring, viewSearch:
 			m.view = viewFeeds
 		}
 		return m, nil
+
+	case key.Matches(msg, m.keys.Filter) && m.view != viewSearch && m.view != viewHiring && m.view != viewStory:
+		m.view = viewSearch
+		var cmd tea.Cmd
+		m.search, cmd = m.search.begin()
+		return m, cmd
 
 	// The p/H/W destination views are reachable from anywhere, matching
 	// the hints in the top bar.
@@ -263,7 +278,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Watch) && m.view != viewWatched && m.view != viewHiring:
 		return m.toggleWatch()
 
-	case key.Matches(msg, m.keys.Open) && (m.view == viewFeeds || m.view == viewPulse || m.view == viewWatched):
+	case key.Matches(msg, m.keys.Open) && (m.view == viewFeeds || m.view == viewPulse || m.view == viewWatched || m.view == viewSearch):
 		if it, ok := m.current(); ok {
 			return m.openStory(it, m.view)
 		}
@@ -302,6 +317,8 @@ func (m Model) delegate(msg tea.Msg) (Model, tea.Cmd) {
 		m.watched, cmd = m.watched.Update(msg)
 	case viewHiring:
 		m.hiring, cmd = m.hiring.Update(msg)
+	case viewSearch:
+		m.search, cmd = m.search.Update(msg)
 	}
 	return m, cmd
 }
@@ -378,6 +395,8 @@ func (m Model) current() (hn.Item, bool) {
 		return row.item, ok
 	case viewHiring:
 		return m.hiring.selected()
+	case viewSearch:
+		return m.search.selected()
 	default:
 		return m.feeds.selected()
 	}
@@ -437,6 +456,7 @@ func (m *Model) applyLayout() {
 	m.pulse.setSize(m.width, h)
 	m.watched.setSize(m.width, h)
 	m.hiring.setSize(m.width, h)
+	m.search.setSize(m.width, h)
 }
 
 func (m Model) View() tea.View {
@@ -461,6 +481,8 @@ func (m Model) View() tea.View {
 		content = m.watched.View()
 	case viewHiring:
 		content = m.hiring.View()
+	case viewSearch:
+		content = m.search.View()
 	default:
 		content = m.feeds.View()
 	}
