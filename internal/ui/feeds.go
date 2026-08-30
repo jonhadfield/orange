@@ -279,7 +279,11 @@ func (m feedsModel) View() string {
 	case st.err != nil:
 		b.WriteString(styleError.Render("✗ could not load " + feedNames[m.feed()] + " stories"))
 		b.WriteString("\n" + styleMeta.Render(st.err.Error()))
-		b.WriteString("\n\n" + styleMeta.Render("check your connection, then press tab to retry"))
+		// r reloads this feed. tab does eventually retry it too, because
+		// switchFeed clears the error on the way back, but that means
+		// leaving the feed and returning to it — a longer route to the
+		// same place, and r is already on the key bar below.
+		b.WriteString("\n\n" + styleMeta.Render("check your connection, then press r to try again"))
 	case len(st.items) == 0 && st.loading:
 		b.WriteString(styleMeta.Render(m.spinner.View() + " loading " + feedNames[m.feed()] + " stories…"))
 	case len(st.items) == 0:
