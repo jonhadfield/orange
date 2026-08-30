@@ -43,11 +43,14 @@ type pulseTickMsg struct{}
 // pulseModel is the auto-refreshing live view of the front page, showing
 // rank movement and score/comment velocity between refreshes.
 type pulseModel struct {
-	client      *hn.Client
-	keys        keyMap
-	spinner     spinner.Model
-	prev        map[int]pulseSample
-	baseline    bool
+	client   *hn.Client
+	keys     keyMap
+	spinner  spinner.Model
+	prev     map[int]pulseSample
+	baseline bool
+	// readings counts the front pages seen. Movement is the difference
+	// between two of them, so the first has nothing to show.
+	readings    int
 	rows        []pulseRow
 	cursor      int
 	loading     bool
@@ -146,6 +149,7 @@ func (m pulseModel) Update(msg tea.Msg) (pulseModel, tea.Cmd) {
 		}
 		m.prev = next
 		m.baseline = true
+		m.readings++
 		m.rows = rows
 		if m.cursor >= len(rows) {
 			m.cursor = max(0, len(rows)-1)
@@ -204,6 +208,13 @@ func (m pulseModel) View() string {
 	} else if !m.refreshedAt.IsZero() {
 		status = fmt.Sprintf("refreshed %s · every %ds · r refreshes now",
 			relAge(m.refreshedAt.Unix(), time.Now()), int(pulseInterval.Seconds()))
+	}
+	// Every row is still on a first reading, so the movement column is a
+	// row of dots and there is nothing to explain it. Say so, rather than
+	// leaving a reader to wonder whether the front page is simply quiet.
+	if m.readings == 1 && !m.loading {
+		status = fmt.Sprintf("first reading · movement appears after the next, in %ds",
+			int(pulseInterval.Seconds()))
 	}
 	header := styleLogo.Render("HN") + styleTabActive.Render("Pulse")
 	b.WriteString(barWithFlex(header, styleMeta.Render(status), m.width, viewPulse))
