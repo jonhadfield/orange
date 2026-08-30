@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jonhadfield/orange/internal/hn"
 )
@@ -129,5 +131,41 @@ func TestPulseCursorSurvivesAShrinkingList(t *testing.T) {
 	}
 	if _, ok := m.selected(); !ok {
 		t.Error("selected() found nothing after the list shrank")
+	}
+}
+
+// TestPulseFirstReadingExplainsItself: on a first reading every row shows a
+// dot in the movement column, because there is nothing to compare against.
+// Without a word about it, a reader cannot tell whether the feature is
+// working or the front page is simply quiet.
+func TestPulseFirstReadingExplainsItself(t *testing.T) {
+	m := newPulseModel(nil, newKeyMap())
+	m.setSize(100, 24)
+	m.refreshedAt = time.Unix(1, 0)
+	m = pulseWith(m, []hn.Item{story(1, 100, 10), story(2, 90, 5)})
+
+	view := stripStyles(m.View())
+	if !strings.Contains(view, "movement appears after the next") {
+		t.Errorf("the first reading does not say why nothing is moving:\n%s", view)
+	}
+
+	// And it goes away once there is something to compare against.
+	m = pulseWith(m, []hn.Item{story(2, 95, 6), story(1, 100, 10)})
+	view = stripStyles(m.View())
+	if strings.Contains(view, "movement appears after the next") {
+		t.Errorf("the note survived into the second reading:\n%s", view)
+	}
+	if !strings.Contains(view, "refreshed") {
+		t.Errorf("the ordinary status did not come back:\n%s", view)
+	}
+}
+
+// TestPulseNoteWaitsForData: the note is about a reading that has happened,
+// so it must not appear before one has.
+func TestPulseNoteWaitsForData(t *testing.T) {
+	m := newPulseModel(nil, newKeyMap())
+	m.setSize(100, 24)
+	if view := stripStyles(m.View()); strings.Contains(view, "movement appears after the next") {
+		t.Errorf("the note appeared before any data arrived:\n%s", view)
 	}
 }
