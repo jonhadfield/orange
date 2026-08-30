@@ -128,5 +128,18 @@ func pluralize(n int, word string) string {
 	if n == 1 {
 		return "1 " + word
 	}
+	// A consonant before a final y takes -ies: reply becomes replies, while
+	// day keeps its y and becomes days.
+	if len(word) > 1 && word[len(word)-1] == 'y' && !isVowel(word[len(word)-2]) {
+		return fmt.Sprintf("%d %sies", n, word[:len(word)-1])
+	}
 	return fmt.Sprintf("%d %ss", n, word)
+}
+
+func isVowel(c byte) bool {
+	switch c {
+	case 'a', 'e', 'i', 'o', 'u', 'A', 'E', 'I', 'O', 'U':
+		return true
+	}
+	return false
 }
