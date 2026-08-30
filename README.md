@@ -24,7 +24,8 @@ orange knows the history and the momentum of a story, not just its snapshot:
 - **Who is hiring?** (`H`) — finds the latest monthly hiring thread and lets
   you filter job posts by keyword (`/ remote golang`)
 - **Search** (`/`) — find stories by keyword across all of Hacker News, not
-  just the feed you are looking at, ranked by relevance
+  just the feed you are looking at, ranked by relevance; `tab` searches
+  comments instead, and opening one takes you to its thread
 
 And the fundamentals:
 
@@ -99,6 +100,7 @@ orange --version  # print the version
 | `tab` / `shift+tab` | Next / previous feed                          |
 | `1`–`6`             | Jump straight to a feed (on the story list)   |
 | `/`                 | Search stories by keyword                     |
+| `tab` (in search)   | Switch between story and comment results      |
 | `enter` / `l`       | Open story; in a thread, fold/unfold comment  |
 | `1`–`5` (in thread) | Open a past discussion of the same link       |
 | `o`                 | Open the story link in your browser           |
