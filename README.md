@@ -66,7 +66,7 @@ The uninstall is unqualified on purpose: the old `orange` cask is no longer
 in the tap, so naming it as `jonhadfield/tap/orange` fails to resolve.
 Homebrew still knows about the copy you installed.
 
-Or with Go 1.26 or later:
+Or with Go 1.27 or later:
 
 ```sh
 go install github.com/jonhadfield/orange/cmd/orange@latest
