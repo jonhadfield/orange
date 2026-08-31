@@ -156,6 +156,11 @@ Algolia search API), `internal/htmltext` converts HN comment HTML to
 terminal text, `internal/store` persists the watch list, and `internal/ui`
 holds the Bubble Tea models.
 
+## Credits
+
+Written by [Jon Hadfield](https://github.com/jonhadfield), co-authored with
+[Claude](https://claude.ai).
+
 ## License
 
 [MIT](LICENSE)
