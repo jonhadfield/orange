@@ -1,9 +1,14 @@
 # orange
 
+[![ci](https://github.com/jonhadfield/orange/actions/workflows/ci.yml/badge.svg)](https://github.com/jonhadfield/orange/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/jonhadfield/orange)](https://github.com/jonhadfield/orange/releases/latest)
+[![go](https://img.shields.io/github/go-mod/go-version/jonhadfield/orange)](go.mod)
+[![licence](https://img.shields.io/github/license/jonhadfield/orange)](LICENSE)
+
 A terminal reader for [Hacker News](https://news.ycombinator.com), built with
-[Bubble Tea](https://github.com/charmbracelet/bubbletea). Browse the front
-page, read threaded comments, and open stories in your browser without
-leaving the terminal.
+[Bubble Tea](https://github.com/charmbracelet/bubbletea). Read the feeds and
+their comment threads, search the whole site, keep an eye on discussions you
+care about, and open anything in your browser — without leaving the terminal.
 
 ![orange showing the Hacker News front page](docs/screenshot.png)
 
@@ -54,8 +59,13 @@ With [Homebrew](https://brew.sh):
 brew install jonhadfield/tap/orange-cli
 ```
 
-The cask is `orange-cli` because an unrelated Homebrew package (Orange
-Data Mining) owns the `orange` token. The installed command is still
+The installed command is `orange`.
+
+<details>
+<summary>Why the cask is <code>orange-cli</code>, and moving from the old one</summary>
+
+An unrelated Homebrew package (Orange Data Mining) owns the `orange` token,
+so the cask had to be named `orange-cli`. The command it installs is still
 `orange`.
 
 If you installed an earlier version under the old token, switch over with:
@@ -68,6 +78,8 @@ brew install jonhadfield/tap/orange-cli
 The uninstall is unqualified on purpose: the old `orange` cask is no longer
 in the tap, so naming it as `jonhadfield/tap/orange` fails to resolve.
 Homebrew still knows about the copy you installed.
+
+</details>
 
 Or with Go 1.27 or later:
 
