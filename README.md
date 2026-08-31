@@ -80,11 +80,17 @@ Homebrew still knows about the copy you installed.
 
 </details>
 
-Or, on macOS, download the signed installer — `orange_<version>_macos.pkg` on
-the [latest release](https://github.com/jonhadfield/orange/releases/latest) —
-and open it. It puts `orange` in `/usr/local/bin`. The package is notarized
-with a stapled ticket, so it installs with no Gatekeeper warning; a bare binary
-from one of the tarballs is quarantined by the browser and refused instead.
+Or, on macOS, with the signed installer:
+
+```sh
+curl -fLO https://github.com/jonhadfield/orange/releases/latest/download/orange_macos.pkg
+sudo installer -pkg orange_macos.pkg -target /
+```
+
+That puts `orange` in `/usr/local/bin`. The package is notarized with a stapled
+ticket, so it installs with no Gatekeeper warning; a bare binary from one of the
+tarballs is quarantined by the browser and refused instead. Double-clicking the
+`.pkg` works too.
 
 Or with Go 1.27 or later:
 
