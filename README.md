@@ -2,7 +2,6 @@
 
 [![ci](https://github.com/jonhadfield/orange/actions/workflows/ci.yml/badge.svg)](https://github.com/jonhadfield/orange/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/jonhadfield/orange)](https://github.com/jonhadfield/orange/releases/latest)
-[![go](https://img.shields.io/github/go-mod/go-version/jonhadfield/orange)](go.mod)
 [![licence](https://img.shields.io/github/license/jonhadfield/orange)](LICENSE)
 
 A terminal reader for [Hacker News](https://news.ycombinator.com), built with
