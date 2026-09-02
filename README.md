@@ -157,6 +157,21 @@ and carries on with an empty list, telling you where the old one went, so
 watching keeps working and the previous contents are still there to look
 at.
 
+### Proxies
+
+orange goes through the usual environment variables. Both API endpoints
+are HTTPS, so `HTTPS_PROXY` (or `https_proxy`) is the one that matters;
+`NO_PROXY` exempts hosts from it in the normal way.
+
+```sh
+export HTTPS_PROXY=http://proxy.example:3128
+orange
+```
+
+The environment is read once at startup, so set it before launching. A
+proxy that intercepts TLS needs its CA certificate in the system trust
+store, as orange has no flag to skip or redirect verification.
+
 ## Development
 
 ```sh
