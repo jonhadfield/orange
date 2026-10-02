@@ -24,43 +24,68 @@ type commentTree struct {
 	roots  []*commentNode
 	byID   map[int]*commentNode
 	count  int
+	// orphans holds comments whose parent has not arrived yet. The fetch
+	// path marks every ID as queued before the response lands, so a child
+	// that outruns its parent would otherwise be skipped forever; buffering
+	// them here lets the parent pick them up when it does arrive.
+	orphans map[int][]hn.Item
 }
 
 func newCommentTree(rootID int) *commentTree {
-	return &commentTree{rootID: rootID, byID: make(map[int]*commentNode)}
+	return &commentTree{
+		rootID:  rootID,
+		byID:    make(map[int]*commentNode),
+		orphans: make(map[int][]hn.Item),
+	}
 }
 
 // add attaches fetched comments beneath their parents, returning the items
 // that were actually added. Deleted and dead comments are retained as
-// placeholders rather than dropped, so the replies below them survive;
-// comments whose parent is genuinely absent are skipped.
+// placeholders rather than dropped, so the replies below them survive.
+// Comments whose parent is not yet in the tree are held until it arrives.
 func (t *commentTree) add(items []hn.Item) []hn.Item {
 	var added []hn.Item
 	for _, it := range items {
-		if it.Type != "comment" {
-			continue
+		added = append(added, t.tryAdd(it)...)
+	}
+	return added
+}
+
+// tryAdd inserts one comment, then any orphans that were waiting on it.
+func (t *commentTree) tryAdd(it hn.Item) []hn.Item {
+	if it.Type != "comment" {
+		return nil
+	}
+	if _, ok := t.byID[it.ID]; ok {
+		return nil
+	}
+
+	n := &commentNode{item: it, placeholder: it.Deleted || it.Dead}
+	switch parent, ok := t.byID[it.Parent]; {
+	case it.Parent == t.rootID:
+		t.roots = append(t.roots, n)
+	case ok:
+		n.depth = parent.depth + 1
+		parent.children = append(parent.children, n)
+	default:
+		t.orphans[it.Parent] = append(t.orphans[it.Parent], it)
+		return nil
+	}
+
+	t.byID[it.ID] = n
+	if !n.placeholder {
+		// Converting once here keeps HTML handling off the render
+		// path, which runs on every keystroke.
+		n.text = htmltext.ConvertLinked(it.Text)
+		t.count++
+	}
+
+	added := []hn.Item{it}
+	if waiting := t.orphans[it.ID]; len(waiting) > 0 {
+		delete(t.orphans, it.ID)
+		for _, child := range waiting {
+			added = append(added, t.tryAdd(child)...)
 		}
-		if _, ok := t.byID[it.ID]; ok {
-			continue
-		}
-		n := &commentNode{item: it, placeholder: it.Deleted || it.Dead}
-		switch parent, ok := t.byID[it.Parent]; {
-		case it.Parent == t.rootID:
-			t.roots = append(t.roots, n)
-		case ok:
-			n.depth = parent.depth + 1
-			parent.children = append(parent.children, n)
-		default:
-			continue
-		}
-		t.byID[it.ID] = n
-		if !n.placeholder {
-			// Converting once here keeps HTML handling off the render
-			// path, which runs on every keystroke.
-			n.text = htmltext.ConvertLinked(it.Text)
-			t.count++
-		}
-		added = append(added, it)
 	}
 	return added
 }

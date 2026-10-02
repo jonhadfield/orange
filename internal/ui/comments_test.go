@@ -97,7 +97,28 @@ func TestCommentTreeHidesChildlessRemovedComments(t *testing.T) {
 	}
 }
 
-func TestCommentTreeSkipsTrueOrphans(t *testing.T) {
+func TestCommentTreeHoldsOrphansUntilParentArrives(t *testing.T) {
+	tree := newCommentTree(100)
+	tree.add([]hn.Item{{ID: 1, Type: "comment", Parent: 100}})
+	// Child before parent: held, not shown, not lost.
+	tree.add([]hn.Item{{ID: 3, Type: "comment", Parent: 2, Text: "early reply"}})
+	if got, want := visibleIDs(tree), []int{1}; !equalInts(got, want) {
+		t.Errorf("visible before parent = %v, want %v", got, want)
+	}
+	if _, ok := tree.byID[3]; ok {
+		t.Fatal("orphan was attached before its parent arrived")
+	}
+
+	tree.add([]hn.Item{{ID: 2, Type: "comment", Parent: 100, Text: "late parent"}})
+	if got, want := visibleIDs(tree), []int{1, 2, 3}; !equalInts(got, want) {
+		t.Errorf("visible after parent = %v, want %v", got, want)
+	}
+	if d := tree.byID[3].depth; d != 1 {
+		t.Errorf("depth of attached orphan = %d, want 1", d)
+	}
+}
+
+func TestCommentTreeKeepsUnresolvedOrphansOffScreen(t *testing.T) {
 	tree := newCommentTree(100)
 	tree.add([]hn.Item{{ID: 1, Type: "comment", Parent: 100}})
 	// Parent 999 was never fetched, so there is nowhere to attach this.
@@ -105,6 +126,9 @@ func TestCommentTreeSkipsTrueOrphans(t *testing.T) {
 
 	if got, want := visibleIDs(tree), []int{1}; !equalInts(got, want) {
 		t.Errorf("visible = %v, want %v", got, want)
+	}
+	if len(tree.orphans[999]) != 1 {
+		t.Errorf("unresolved orphan was not buffered: %#v", tree.orphans)
 	}
 }
 

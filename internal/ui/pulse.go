@@ -54,6 +54,7 @@ type pulseModel struct {
 	rows        []pulseRow
 	cursor      int
 	loading     bool
+	warn        string
 	err         error
 	width       int
 	height      int
@@ -128,11 +129,16 @@ func (m pulseModel) Update(msg tea.Msg) (pulseModel, tea.Cmd) {
 
 	case pulseDataMsg:
 		m.loading = false
-		if msg.err != nil {
-			m.err = msg.err
+		had := len(m.rows) > 0
+		m.warn, m.err = applyFetchErr(msg.err, len(msg.items) > 0, had, "stories")
+		if m.err != nil {
 			return m, schedulePulseTick()
 		}
-		m.err = nil
+		if len(msg.items) == 0 {
+			// A soft failure with nothing new: keep the previous reading
+			// on screen rather than blanking the view.
+			return m, schedulePulseTick()
+		}
 		next := make(map[int]pulseSample, len(msg.items))
 		rows := make([]pulseRow, 0, len(msg.items))
 		for i, it := range msg.items {
@@ -217,12 +223,17 @@ func (m pulseModel) View() string {
 			int(pulseInterval.Seconds()))
 	}
 	header := styleLogo.Render("HN") + styleTabActive.Render("Pulse")
-	b.WriteString(barWithFlex(header, styleMeta.Render(status), m.width, viewPulse))
+	flex := styleMeta.Render(status)
+	if m.warn != "" && !m.loading {
+		flex = styleError.Render("⚠ " + m.warn)
+	}
+	b.WriteString(barWithFlex(header, flex, m.width, viewPulse))
 	b.WriteString("\n\n")
 
 	switch {
 	case m.err != nil:
 		b.WriteString(styleError.Render("✗ pulse unavailable: " + m.err.Error()))
+		b.WriteString("\n\n" + styleMeta.Render("check your connection, then press r to try again"))
 	case len(m.rows) == 0:
 		b.WriteString(styleMeta.Render(m.spinner.View() + " taking the first reading…"))
 	default:

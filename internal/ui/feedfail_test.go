@@ -158,6 +158,44 @@ func TestItemLoadFailureIsShownToo(t *testing.T) {
 	}
 }
 
+// TestPartialItemLoadKeepsWhatArrived: Items returns a *PartialError with
+// the successful items alongside it. Dropping them blanks a page that has
+// something to show.
+func TestPartialItemLoadKeepsWhatArrived(t *testing.T) {
+	m := newFeedsModel(nil, newKeyMap())
+	m.setSize(100, 24)
+	feed := m.feed()
+
+	m, _ = m.Update(feedIDsMsg{feed: feed, ids: []int{1, 2, 3}})
+	m, _ = m.Update(feedItemsMsg{
+		feed: feed, offset: 0,
+		items: []hn.Item{
+			{ID: 1, Type: "story", Title: "Survived", By: "someone", Score: 10},
+		},
+		err: &hn.PartialError{Fetched: 1, Requested: 3, Err: errors.New("timeout")},
+	})
+
+	st := m.state()
+	if st.err != nil {
+		t.Fatalf("partial failure became hard error: %v", st.err)
+	}
+	if st.warn == "" {
+		t.Fatal("partial failure produced no warning")
+	}
+	if len(st.items) != 1 || st.items[0].Title != "Survived" {
+		t.Fatalf("items = %+v, want the story that arrived", st.items)
+	}
+	view := stripStyles(m.View())
+	if !strings.Contains(view, "Survived") {
+		t.Errorf("arrived story is not shown:\n%s", view)
+	}
+	// The tab-bar flex truncates long warnings; the marker is enough to
+	// prove the soft failure is on screen rather than blanking the list.
+	if !strings.Contains(view, "⚠") {
+		t.Errorf("warning is not shown:\n%s", view)
+	}
+}
+
 // TestRefreshReloadsAFeedThatAlreadyHasStories: r has to work on a healthy
 // feed too, and that depends on the refresh clearing the state. loadFeed
 // returns early when ids are already present, so without the reset r would

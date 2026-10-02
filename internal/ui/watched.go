@@ -41,6 +41,7 @@ type watchedModel struct {
 	rows    []watchedRow
 	cursor  int
 	loading bool
+	warn    string
 	err     error
 	width   int
 	height  int
@@ -59,6 +60,7 @@ func (m *watchedModel) setSize(w, h int) { m.width, m.height = w, h }
 
 func (m watchedModel) start() (watchedModel, tea.Cmd) {
 	m.err = nil
+	m.warn = ""
 	m.rows = nil
 	if m.st == nil {
 		m.err = errors.New(storeUnavailable("watch list"))
@@ -108,8 +110,8 @@ func (m watchedModel) Update(msg tea.Msg) (watchedModel, tea.Cmd) {
 
 	case watchedDataMsg:
 		m.loading = false
-		if msg.err != nil {
-			m.err = msg.err
+		m.warn, m.err = applyFetchErr(msg.err, len(msg.items) > 0, false, "stories")
+		if m.err != nil {
 			return m, nil
 		}
 		m.rows = m.rows[:0]
@@ -183,12 +185,22 @@ func (m watchedModel) Update(msg tea.Msg) (watchedModel, tea.Cmd) {
 
 func (m watchedModel) View() string {
 	var b strings.Builder
-	b.WriteString(barWithHints(styleLogo.Render("HN")+styleTabActive.Render("Watched"), m.width, viewWatched))
+	flex := ""
+	if m.warn != "" {
+		flex = styleError.Render("⚠ " + m.warn)
+	}
+	left := styleLogo.Render("HN") + styleTabActive.Render("Watched")
+	if flex != "" {
+		b.WriteString(barWithFlex(left, flex, m.width, viewWatched))
+	} else {
+		b.WriteString(barWithHints(left, m.width, viewWatched))
+	}
 	b.WriteString("\n\n")
 
 	switch {
 	case m.err != nil:
 		b.WriteString(styleError.Render("✗ " + m.err.Error()))
+		b.WriteString("\n\n" + styleMeta.Render("check your connection, then press r to try again"))
 	case m.loading && len(m.rows) == 0:
 		b.WriteString(styleMeta.Render(m.spinner.View() + " checking watched stories…"))
 	case len(m.rows) == 0:

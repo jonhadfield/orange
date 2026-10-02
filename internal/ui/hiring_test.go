@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -239,5 +240,45 @@ func TestHiringSelectTopPostPastTheEnd(t *testing.T) {
 
 	if m.cursor < 0 || m.cursor >= len(m.visible) {
 		t.Errorf("cursor = %d with %d posts, want a valid index", m.cursor, len(m.visible))
+	}
+}
+
+func TestHiringKeepsPostsOnPartialFailure(t *testing.T) {
+	m := newHiringModel(nil, newKeyMap())
+	m.setSize(100, 20)
+	m.thread = hn.Item{ID: 99, Title: "Ask HN: Who is hiring?", Kids: []int{1, 2}}
+	m, _ = m.Update(hiringPostsMsg{
+		threadID: 99,
+		items: []hn.Item{
+			{ID: 1, Type: "comment", Parent: 99, By: "acme", Text: "Acme | Go | Remote"},
+		},
+		err: &hn.PartialError{Fetched: 1, Requested: 2, Err: errors.New("timeout")},
+	})
+
+	if m.err != nil {
+		t.Fatalf("partial failure became hard error: %v", m.err)
+	}
+	if m.warn == "" {
+		t.Fatal("partial failure produced no warning")
+	}
+	if len(m.posts) != 1 {
+		t.Fatalf("posts = %d, want 1 kept", len(m.posts))
+	}
+	view := stripStyles(m.View())
+	if !strings.Contains(view, "Acme") {
+		t.Errorf("kept post is not shown:\n%s", view)
+	}
+	if !strings.Contains(view, "⚠") {
+		t.Errorf("warning is not shown:\n%s", view)
+	}
+}
+
+func TestHiringFailureShowsRetryAdvice(t *testing.T) {
+	m := newHiringModel(nil, newKeyMap())
+	m.setSize(100, 20)
+	m, _ = m.Update(hiringThreadMsg{err: errors.New("dial failed")})
+	view := stripStyles(m.View())
+	if !strings.Contains(view, "press r") {
+		t.Errorf("failure view does not name the retry key:\n%s", view)
 	}
 }

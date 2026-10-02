@@ -54,6 +54,7 @@ type feedState struct {
 	items   []hn.Item
 	cursor  int
 	loading bool
+	warn    string
 	err     error
 }
 
@@ -195,14 +196,15 @@ func (m feedsModel) Update(msg tea.Msg) (feedsModel, tea.Cmd) {
 	case feedItemsMsg:
 		st := m.states[msg.feed]
 		st.loading = false
-		if msg.err != nil {
-			st.err = msg.err
-			return m, nil
-		}
 		if msg.offset != len(st.items) {
 			return m, nil
 		}
-		st.items = append(st.items, msg.items...)
+		st.warn = ""
+		st.err = nil
+		if len(msg.items) > 0 {
+			st.items = append(st.items, msg.items...)
+		}
+		st.warn, st.err = applyFetchErr(msg.err, len(msg.items) > 0, len(st.items) > 0, "stories")
 		return m, nil
 
 	case tea.MouseWheelMsg:
@@ -306,7 +308,11 @@ func (m feedsModel) tabBar() string {
 	left := lipgloss.JoinHorizontal(lipgloss.Center, append([]string{logo}, m.tabs(budget)...)...)
 
 	flex := ""
-	if st := m.state(); st.loading && len(st.items) > 0 {
+	st := m.state()
+	switch {
+	case st.warn != "":
+		flex = styleError.Render("⚠ " + st.warn)
+	case st.loading && len(st.items) > 0:
 		flex = styleMeta.Render(m.spinner.View() + " loading more…")
 	}
 	return barWithFlex(left, flex, m.width, viewFeeds)

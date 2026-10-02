@@ -57,6 +57,7 @@ type hiringModel struct {
 	lineOf    []int
 	filtering bool
 	loading   bool
+	warn      string
 	err       error
 }
 
@@ -90,6 +91,7 @@ func (m hiringModel) start() (hiringModel, tea.Cmd) {
 		return m, nil // already loaded this session
 	}
 	m.loading = true
+	m.warn = ""
 	m.err = nil
 	client := m.client
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
@@ -154,10 +156,8 @@ func (m hiringModel) Update(msg tea.Msg) (hiringModel, tea.Cmd) {
 			return m, nil
 		}
 		m.loading = false
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
+		m.warn = ""
+		had := len(m.posts) > 0
 		for _, it := range msg.items {
 			if it.Deleted || it.Dead || it.Type != "comment" || strings.TrimSpace(it.Text) == "" {
 				continue
@@ -174,6 +174,10 @@ func (m hiringModel) Update(msg tea.Msg) (hiringModel, tea.Cmd) {
 				textLow:    strings.ToLower(text),
 				headline:   headline,
 			})
+		}
+		m.warn, m.err = applyFetchErr(msg.err, len(msg.items) > 0, had, "posts")
+		if m.err != nil {
+			return m, nil
 		}
 		(&m).recompute()
 		(&m).renderContent()
@@ -320,37 +324,19 @@ func (m *hiringModel) recompute() {
 // cursorOffScreen reports whether the selected post has been scrolled out of
 // view, which is what free scrolling does.
 func (m *hiringModel) cursorOffScreen() bool {
-	if m.cursor >= len(m.lineOf) {
-		return false
-	}
-	line := m.lineOf[m.cursor]
-	return line < m.vp.YOffset() || line >= m.vp.YOffset()+m.vp.Height()
+	return cursorLineOffScreen(m.lineOf, m.cursor, m.vp.YOffset(), m.vp.Height())
 }
 
 // postFrom returns the first post starting at or below the given content
 // line, or -1 when every post starts above it.
 func (m *hiringModel) postFrom(line int) int {
-	for i, l := range m.lineOf {
-		if l >= line {
-			return i
-		}
-	}
-	return -1
+	return indexFrom(m.lineOf, line)
 }
 
 // postInView returns the first post whose header is on screen, or -1 when
 // none is.
 func (m *hiringModel) postInView() int {
-	top, bottom := m.vp.YOffset(), m.vp.YOffset()+m.vp.Height()
-	for i, l := range m.lineOf {
-		if l >= top {
-			if l < bottom {
-				return i
-			}
-			break // sorted, so nothing later is in view either
-		}
-	}
-	return -1
+	return indexInView(m.lineOf, m.vp.YOffset(), m.vp.YOffset()+m.vp.Height())
 }
 
 // selectTopPost highlights the post at the top of the viewport, leaving the
@@ -369,12 +355,7 @@ func (m *hiringModel) selectTopPost() {
 
 // postUpTo is postFrom from the other end, for moving up.
 func (m *hiringModel) postUpTo(line int) int {
-	for i := len(m.lineOf) - 1; i >= 0; i-- {
-		if m.lineOf[i] <= line {
-			return i
-		}
-	}
-	return -1
+	return indexUpTo(m.lineOf, line)
 }
 
 func (m *hiringModel) ensureCursorVisible() {
@@ -454,11 +435,15 @@ func (m hiringModel) View() string {
 	if counts != "" {
 		flex += "  " + styleMeta.Render(counts)
 	}
+	if m.warn != "" && m.err == nil {
+		flex += "  " + styleError.Render("⚠ "+m.warn)
+	}
 
 	var body string
 	switch {
 	case m.err != nil:
 		body = styleError.Render("✗ hiring thread unavailable: " + m.err.Error())
+		body += "\n\n" + styleMeta.Render("check your connection, then press r to try again")
 	case len(m.posts) == 0:
 		body = styleMeta.Render(m.spinner.View() + " finding the latest hiring thread…")
 	case len(m.visible) == 0:

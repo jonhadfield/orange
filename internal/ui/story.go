@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -236,16 +235,12 @@ func (m storyModel) Update(msg tea.Msg) (storyModel, tea.Cmd) {
 			return m, nil
 		}
 		m.inflight--
-		if msg.err != nil {
-			var partial *hn.PartialError
-			if errors.As(msg.err, &partial) {
-				m.warn = fmt.Sprintf("%d of %d comments failed to load",
-					partial.Requested-partial.Fetched, partial.Requested)
-			} else {
-				// Surface the failure but keep whatever else is still
-				// arriving, rather than discarding the whole thread.
-				m.err = msg.err
-			}
+		// Keep whatever arrived: a partial failure is a warning, and even
+		// a hard error must not discard comments that did load.
+		if w, hard := applyFetchErr(msg.err, len(msg.items) > 0, m.tree.count > 0, "comments"); w != "" {
+			m.warn = w
+		} else if hard != nil {
+			m.err = hard
 		}
 		m.tree.add(msg.items)
 		// Walk from every fetched comment, not just the newly added ones:
@@ -367,11 +362,7 @@ func (m storyModel) handleKey(msg tea.KeyPressMsg) (storyModel, tea.Cmd) {
 // of view. That is exactly what free scrolling does: it moves the viewport
 // and deliberately leaves the selection where it was.
 func (m *storyModel) cursorOffScreen() bool {
-	if m.cursor >= len(m.lineOf) {
-		return false
-	}
-	line := m.lineOf[m.cursor]
-	return line < m.vp.YOffset() || line >= m.vp.YOffset()+m.vp.Height()
+	return cursorLineOffScreen(m.lineOf, m.cursor, m.vp.YOffset(), m.vp.Height())
 }
 
 // nodeFrom returns the first comment starting at or below the given content
@@ -379,27 +370,13 @@ func (m *storyModel) cursorOffScreen() bool {
 // next comment the reader can see, whether it is already on screen or just
 // below the fold of a long comment they are part-way through.
 func (m *storyModel) nodeFrom(line int) int {
-	for i, l := range m.lineOf {
-		if l >= line {
-			return i
-		}
-	}
-	return -1
+	return indexFrom(m.lineOf, line)
 }
 
 // nodeInView returns the first comment whose header is on screen, or -1 when
 // none is — which happens inside a comment taller than the whole viewport.
 func (m *storyModel) nodeInView() int {
-	top, bottom := m.vp.YOffset(), m.vp.YOffset()+m.vp.Height()
-	for i, l := range m.lineOf {
-		if l >= top {
-			if l < bottom {
-				return i
-			}
-			break // sorted, so nothing later is in view either
-		}
-	}
-	return -1
+	return indexInView(m.lineOf, m.vp.YOffset(), m.vp.YOffset()+m.vp.Height())
 }
 
 // selectTopComment highlights the comment at the top of the viewport: the
@@ -421,12 +398,7 @@ func (m *storyModel) selectTopComment() {
 // nodeUpTo is nodeFrom from the other end: the last comment starting at or
 // above the given line, or -1 when every comment starts below it.
 func (m *storyModel) nodeUpTo(line int) int {
-	for i := len(m.lineOf) - 1; i >= 0; i-- {
-		if m.lineOf[i] <= line {
-			return i
-		}
-	}
-	return -1
+	return indexUpTo(m.lineOf, line)
 }
 
 func (m *storyModel) ensureCursorVisible() {
@@ -596,9 +568,11 @@ func (m storyModel) View() string {
 			count = m.tree.count
 		}
 		status = styleMeta.Render(pluralize(count, "comment") + " loaded")
-		if m.warn != "" {
-			status += styleError.Render("  ⚠ " + m.warn)
-		}
+	}
+	// A partial failure is worth saying even while more batches are still
+	// arriving; waiting until the end leaves it invisible on a long thread.
+	if m.warn != "" && m.err == nil {
+		status += styleError.Render("  ⚠ " + m.warn)
 	}
 	return m.bar() + "\n" + m.vp.View() + "\n" + status
 }

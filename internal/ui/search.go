@@ -374,11 +374,15 @@ func (m searchModel) rows() string {
 			titleStyle.Render(it.Title)
 		if d := domain(it.URL); d != "" {
 			line1 += " " + styledLink(styleLink, it.URL, "("+d+")")
-			line1 += "\x1b]8;;\x1b\\"
+			// Truncation can cut the hyperlink's closing sequence; reset
+			// unconditionally so a link never bleeds into later lines.
+			line1 = ansi.Truncate(line1, m.width, "…") + linkReset
+		} else {
+			line1 = ansi.Truncate(line1, m.width, "…")
 		}
 		meta := fmt.Sprintf("by %s · %s · %s", it.By, relAge(it.Time, now),
 			pluralize(it.Descendants, "comment"))
-		b.WriteString(ansi.Truncate(line1, m.width, "…") + "\n")
+		b.WriteString(line1 + "\n")
 		b.WriteString(ansi.Truncate(indent+styleMeta.Render(meta), m.width, "…") + "\n\n")
 	}
 	return strings.TrimRight(b.String(), "\n")

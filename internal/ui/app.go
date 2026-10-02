@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -226,10 +228,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Quit):
 		// The only synchronous write left. Every other Save runs off the
 		// update loop, so a change made just before quitting may still be
-		// in memory, and there is no later frame to do it on.
-		if m.st != nil {
-			_ = m.st.Save()
-		}
+		// in memory, and there is no later frame to do it on. A failure
+		// here has nowhere left to show a notice, so it goes to stderr.
+		flushStoreOnQuit(m.st, os.Stderr)
 		return m, tea.Quit
 
 	case key.Matches(msg, m.keys.Help):
@@ -373,6 +374,17 @@ func (m Model) toggleWatch() (Model, tea.Cmd) {
 // storeErrMsg carries a failed write back to the update loop, since the
 // write no longer happens where the keypress is handled.
 type storeErrMsg struct{ err error }
+
+// flushStoreOnQuit is the synchronous watch-list write on q. Failures are
+// reported on w because the alternate screen is about to go away.
+func flushStoreOnQuit(st *store.Store, w io.Writer) {
+	if st == nil {
+		return
+	}
+	if err := st.Save(); err != nil {
+		fmt.Fprintln(w, "orange: watch list not saved:", err)
+	}
+}
 
 // saveStore writes the watch list off the update loop. Bubble Tea runs
 // Update on one goroutine, and the write is an atomic rewrite with an fsync
