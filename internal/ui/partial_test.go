@@ -24,7 +24,7 @@ func TestApplyFetchErrTotalWithNothingIsHard(t *testing.T) {
 	if warn != "" {
 		t.Errorf("warn = %q, want empty", warn)
 	}
-	if hard != err {
+	if !errors.Is(hard, err) {
 		t.Errorf("hard = %v, want %v", hard, err)
 	}
 }
