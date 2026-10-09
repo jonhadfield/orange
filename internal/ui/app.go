@@ -59,6 +59,10 @@ type Model struct {
 	width    int
 	height   int
 	notice   string
+	// noticeSticky keeps a notice across ordinary keypresses. Save failures
+	// and corrupt-file recovery are sticky; confirmations are not. Esc/back
+	// always clears either kind.
+	noticeSticky bool
 	// the size last handed to the child views, so they are only re-sized
 	// when the space available to them actually changes
 	sizedW, sizedH int
@@ -84,10 +88,22 @@ func New(client *hn.Client, st *store.Store) Model {
 	// unseen, so a state file that had to be set aside is said here instead.
 	if st != nil {
 		if moved, ok := st.Recovered(); ok {
-			m.notice = "watch list was unreadable and has been started again; the old file is at " + moved
+			m.setNotice("watch list was unreadable and has been started again; the old file is at "+moved, true)
 		}
 	}
 	return m
+}
+
+// setNotice puts text in the footer. Sticky notices survive navigation keys
+// until esc/back or a newer notice replaces them.
+func (m *Model) setNotice(text string, sticky bool) {
+	m.notice = text
+	m.noticeSticky = sticky
+}
+
+func (m *Model) clearNotice() {
+	m.notice = ""
+	m.noticeSticky = false
 }
 
 func (m Model) Init() tea.Cmd {
@@ -129,14 +145,15 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case browserOpenedMsg:
 		if msg.err != nil {
-			m.notice = "browser: " + msg.err.Error()
+			m.setNotice("browser: "+msg.err.Error(), false)
 		}
 		return m, nil
 
 	case storeErrMsg:
 		// The watch list is right in memory but did not reach the disk, so
-		// say so rather than letting it look as though it was saved.
-		m.notice = "watch list not saved: " + msg.err.Error()
+		// say so rather than letting it look as though it was saved. Sticky:
+		// the next j/k must not erase the only evidence the write failed.
+		m.setNotice("watch list not saved: "+msg.err.Error(), true)
 		return m, nil
 
 	case openItemMsg:
@@ -153,7 +170,7 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case itemLoadedMsg:
 		if msg.err != nil {
-			m.notice = "could not load story: " + msg.err.Error()
+			m.setNotice("could not load story: "+msg.err.Error(), false)
 			return m, nil
 		}
 		return m.openStory(msg.item, m.prevView)
@@ -186,7 +203,7 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		m.watched, cmd = m.watched.Update(msg)
 		return m, cmd
 
-	case hiringThreadMsg, hiringPostsMsg:
+	case hiringThreadMsg, hiringPostsMsg, hiringCheckMsg:
 		var cmd tea.Cmd
 		m.hiring, cmd = m.hiring.Update(msg)
 		return m, cmd
@@ -223,7 +240,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	m.notice = ""
+	// Ephemeral notices (watching…, browser errors) clear on the next key.
+	// Sticky ones (save failure, corrupt recovery) wait for esc/back.
+	if !m.noticeSticky {
+		m.clearNotice()
+	}
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		// The only synchronous write left. Every other Save runs off the
@@ -238,6 +259,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.Back):
+		m.clearNotice()
 		if m.help.ShowAll {
 			m.help.ShowAll = false
 			return m, nil
@@ -358,15 +380,15 @@ func (m Model) toggleWatch() (Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.st == nil {
-		m.notice = storeUnavailable("watching")
+		m.setNotice(storeUnavailable("watching"), true)
 		return m, nil
 	}
 	// The list changes now and is written afterwards, so the keypress is
 	// answered at once. A write that then fails replaces this notice.
 	if m.st.Toggle(it.ID, it.Title, it.Descendants, time.Now().Unix()) {
-		m.notice = "watching: " + it.Title
+		m.setNotice("watching: "+it.Title, false)
 	} else {
-		m.notice = "stopped watching: " + it.Title
+		m.setNotice("stopped watching: "+it.Title, false)
 	}
 	return m, saveStore(m.st)
 }

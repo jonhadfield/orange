@@ -101,7 +101,11 @@ func (m Model) viewBindings() (short, full []key.Binding) {
 		if p := m.pastHint(); p != nil {
 			short = append(short, *p)
 		}
+		if n := m.nextNewHint(); n != nil {
+			short = append(short, *n)
+		}
 		short = append(short,
+			with(k.Parent, "u", "parent"),
 			with(k.OpenURL, "o", "open"),
 			with(k.Watch, "w", "watch"),
 			back, k.Help, k.Quit)
@@ -110,7 +114,11 @@ func (m Model) viewBindings() (short, full []key.Binding) {
 		if p := m.pastHint(); p != nil {
 			full = append(full, *p)
 		}
+		if n := m.nextNewHint(); n != nil {
+			full = append(full, *n)
+		}
 		full = append(full,
+			with(k.Parent, "u", "parent comment"),
 			with(k.OpenURL, "o", "open link"),
 			with(k.OpenHN, "c", "open HN page"),
 			with(k.Watch, "w", "watch/unwatch"),
@@ -161,6 +169,15 @@ func (m Model) viewBindings() (short, full []key.Binding) {
 			with(k.OpenURL, "o", "open post"),
 			back, k.Help, k.Quit,
 		}
+		if len(m.hiring.threads) > 1 {
+			short = []key.Binding{
+				move,
+				with(k.Open, "enter/l", "expand"),
+				with(k.NextFeed, "tab", "thread"),
+				with(k.Filter, "/", "filter"),
+				back, k.Help, k.Quit,
+			}
+		}
 		if m.hiring.capturing() {
 			// The filter input has the keyboard, so nothing else on this
 			// list is reachable until it gives it back.
@@ -174,6 +191,8 @@ func (m Model) viewBindings() (short, full []key.Binding) {
 			move, jump, scroll, with(k.Open, "enter/l", "expand/collapse"),
 			with(k.Filter, "/", "filter posts"),
 			hint("enter", "apply filter"),
+			with(k.NextFeed, "tab", "next hiring thread"),
+			with(k.PrevFeed, "shift+tab", "previous hiring thread"),
 			with(k.OpenURL, "o", "open post on HN"),
 			with(k.Refresh, "r", "reload thread"),
 			k.Pulse, k.Watched, k.Back, k.Help, k.Quit,
@@ -247,4 +266,14 @@ func (m Model) pastHint() *key.Binding {
 		return &b
 	}
 	return nil
+}
+
+// nextNewHint is offered only while a watched-thread open has new comments
+// to step through; otherwise n would look like a dead key.
+func (m Model) nextNewHint() *key.Binding {
+	if m.story.newSince == 0 {
+		return nil
+	}
+	b := hint("n", "next new")
+	return &b
 }

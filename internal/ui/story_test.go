@@ -310,6 +310,76 @@ func TestDownAtTheEndRevealsTheRestOfALongComment(t *testing.T) {
 	}
 }
 
+// TestJumpNextNew steps through comments newer than newSince, wrapping once
+// so a watched thread can be skimmed without scrolling for ● new markers.
+func TestJumpNextNew(t *testing.T) {
+	m := newStoryModel(hn.NewClient("http://unused.invalid"), newKeyMap())
+	m.story = hn.Item{ID: 100, Title: "a story"}
+	m.newSince = 50
+	m.tree = newCommentTree(100)
+	m.tree.add([]hn.Item{
+		{ID: 1, Type: "comment", Parent: 100, By: "a", Text: "old", Time: 10},
+		{ID: 2, Type: "comment", Parent: 100, By: "b", Text: "new one", Time: 60},
+		{ID: 3, Type: "comment", Parent: 100, By: "c", Text: "also old", Time: 20},
+		{ID: 4, Type: "comment", Parent: 100, By: "d", Text: "new two", Time: 70},
+	})
+	(&m).setSize(80, 24)
+	m.cursor = 0
+
+	m, _ = m.handleKey(keyPress("n"))
+	if m.cursor != 1 || m.nodes[m.cursor].item.ID != 2 {
+		t.Fatalf("first n landed on cursor %d id %d, want comment 2", m.cursor, m.nodes[m.cursor].item.ID)
+	}
+	m, _ = m.handleKey(keyPress("n"))
+	if m.cursor != 3 || m.nodes[m.cursor].item.ID != 4 {
+		t.Fatalf("second n landed on cursor %d id %d, want comment 4", m.cursor, m.nodes[m.cursor].item.ID)
+	}
+	m, _ = m.handleKey(keyPress("n"))
+	if m.cursor != 1 || m.nodes[m.cursor].item.ID != 2 {
+		t.Fatalf("wrap n landed on cursor %d id %d, want comment 2 again", m.cursor, m.nodes[m.cursor].item.ID)
+	}
+}
+
+func TestJumpNextNewWithoutWatermarkIsNoop(t *testing.T) {
+	m := newScrollTestModel(t, 5)
+	before := m.cursor
+	m, _ = m.handleKey(keyPress("n"))
+	if m.cursor != before {
+		t.Errorf("n moved the cursor without newSince: %d → %d", before, m.cursor)
+	}
+}
+
+// TestJumpParent climbs one level in the visible tree. Top-level comments
+// have the story as parent and stay put.
+func TestJumpParent(t *testing.T) {
+	m := newStoryModel(hn.NewClient("http://unused.invalid"), newKeyMap())
+	m.story = hn.Item{ID: 100, Title: "a story"}
+	m.tree = newCommentTree(100)
+	m.tree.add([]hn.Item{
+		{ID: 1, Type: "comment", Parent: 100, By: "a", Text: "root"},
+		{ID: 2, Type: "comment", Parent: 1, By: "b", Text: "reply"},
+		{ID: 3, Type: "comment", Parent: 2, By: "c", Text: "deep"},
+	})
+	(&m).setSize(80, 24)
+	if len(m.nodes) != 3 {
+		t.Fatalf("nodes = %d, want 3", len(m.nodes))
+	}
+	m.cursor = 2 // deep reply
+
+	m, _ = m.handleKey(keyPress("u"))
+	if m.nodes[m.cursor].item.ID != 2 {
+		t.Fatalf("parent of deep = id %d, want 2", m.nodes[m.cursor].item.ID)
+	}
+	m, _ = m.handleKey(keyPress("u"))
+	if m.nodes[m.cursor].item.ID != 1 {
+		t.Fatalf("parent of reply = id %d, want 1", m.nodes[m.cursor].item.ID)
+	}
+	m, _ = m.handleKey(keyPress("u"))
+	if m.nodes[m.cursor].item.ID != 1 {
+		t.Fatalf("parent of root moved to id %d", m.nodes[m.cursor].item.ID)
+	}
+}
+
 // Scrolling deep inside one very long comment leaves no comment starting on
 // screen. Down should reach the next comment, which is just below the fold,
 // rather than crawling a line at a time or snapping back.

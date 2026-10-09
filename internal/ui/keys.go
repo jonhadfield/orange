@@ -20,6 +20,8 @@ type keyMap struct {
 	Hiring     key.Binding
 	Refresh    key.Binding
 	Filter     key.Binding
+	NextNew    key.Binding
+	Parent     key.Binding
 	Back       key.Binding
 	Help       key.Binding
 	Quit       key.Binding
@@ -48,6 +50,8 @@ func newKeyMap() keyMap {
 		Hiring:   key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "hiring")),
 		Refresh:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Filter:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+		NextNew:  key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next new")),
+		Parent:   key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "parent")),
 		Back:     key.NewBinding(key.WithKeys("esc", "h", "b"), key.WithHelp("esc/h/b", "back")),
 		Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),

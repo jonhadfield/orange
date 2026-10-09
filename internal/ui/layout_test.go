@@ -197,7 +197,8 @@ func TestHelpOffersOnlyWhatTheViewHandles(t *testing.T) {
 		// The story list has nothing to fold, expand or filter.
 		viewFeeds: {"/ filter", "fold", "expand"},
 		// Watching is not offered for individual job posts ("W watched
-		// stories" is the destination view, which does work here).
+		// stories" is the destination view, which does work here). Tab
+		// switches hiring/seeking/freelance, not the story-list feeds.
 		viewHiring: {"watch/unwatch", "unwatch", "feed"},
 		// Search has its own query line, not a feed to switch.
 		viewSearch: {"feed"},

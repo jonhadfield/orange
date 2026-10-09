@@ -11,7 +11,7 @@ jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -19,7 +19,7 @@ jobs:
       # with the Go the test job actually ran against, rather than whatever
       # "stable" has moved on to since. Shipping binaries from a toolchain
       # nothing tested is the gap this closes.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -27,8 +27,9 @@ jobs:
       # is at the moment a tag is pushed. A release is the worst place to
       # find out that a tool changed: it runs once, on a tag, and the
       # artefacts it produces are what people download. v2.18.0 built
-      # v0.3.1, so it is a version known to work with this config.
-      - uses: goreleaser/goreleaser-action@v6
+      # v0.3.1, so it is a version known to work with this config. The action
+      # major tracks Node 24; the goreleaser binary version is separate.
+      - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: v2.18.0

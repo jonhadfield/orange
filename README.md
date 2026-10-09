@@ -25,8 +25,9 @@ orange knows the history and the momentum of a story, not just its snapshot:
   ![the pulse view tracking rank and score movement](docs/pulse.png)
 - **Watched threads** (`w` / `W`) — watch a discussion and orange counts the
   comments posted since you last read it and marks each new one in the tree
-- **Who is hiring?** (`H`) — finds the latest monthly hiring thread and lets
-  you filter job posts by keyword (`/ remote golang`)
+- **Who is hiring?** (`H`) — finds the latest monthly whoishiring threads
+  (hiring, seeking, freelance); `tab` switches between them and `/` filters
+  posts by keyword (`/ remote golang`)
 - **Search** (`/`) — find stories by keyword across all of Hacker News, not
   just the feed you are looking at, ranked by relevance; `tab` searches
   comments instead, and opening one takes you to its thread
@@ -126,12 +127,15 @@ orange --version  # print the version
 | `tab` (in search)   | Switch between story and comment results      |
 | `enter` / `l`       | Open story; in a thread, fold/unfold comment  |
 | `1`–`5` (in thread) | Open a past discussion of the same link       |
+| `n` (in thread)     | Jump to the next new comment (watched)        |
+| `u` (in thread)     | Jump to the parent comment                    |
 | `o`                 | Open the story link in your browser           |
 | `c`                 | Open the HN discussion page in your browser   |
 | `w`                 | Watch / unwatch the discussion                |
 | `W`                 | Watched stories, with new-comment counts      |
 | `p`                 | Pulse: live front page with velocity          |
 | `H`                 | Who is hiring? browser                        |
+| `tab` (in hiring)   | Switch hiring / seeking / freelance threads   |
 | `/` (in hiring)     | Filter job posts by keywords                  |
 | `r`                 | Refresh the current view                      |
 | `esc` / `h` / `b`   | Back                                          |

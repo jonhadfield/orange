@@ -313,20 +313,77 @@ func (n algoliaNode) item() Item {
 	return it
 }
 
-// LatestHiringThread returns the item ID of the most recent monthly
-// "Ask HN: Who is hiring?" thread.
-func (c *Client) LatestHiringThread(ctx context.Context) (int, error) {
+// HiringThread is one of the monthly threads posted by the whoishiring
+// account: hiring, seeking work, or freelancers.
+type HiringThread struct {
+	ID    int
+	Title string
+	// Label is the short tab name: "hiring", "seeking", or "freelance".
+	Label string
+}
+
+// hiringLabels is the tab order for the three monthly threads.
+var hiringLabels = []struct {
+	label string
+	match string
+}{
+	{"hiring", "Who is hiring?"},
+	{"seeking", "Who wants to be hired?"},
+	{"freelance", "Freelancer?"},
+}
+
+// LatestHiringThreads returns the newest thread of each monthly kind that
+// Algolia still has, in tab order. Kinds with no match are omitted.
+func (c *Client) LatestHiringThreads(ctx context.Context) ([]HiringThread, error) {
 	q := url.Values{
 		"tags":        {"story,author_whoishiring"},
-		"hitsPerPage": {"10"},
+		"hitsPerPage": {"30"},
 	}
 	var resp algoliaResponse
 	if err := c.getURL(ctx, c.algoliaURL+"/search_by_date?"+q.Encode(), &resp); err != nil {
+		return nil, err
+	}
+	found := make(map[string]HiringThread, len(hiringLabels))
+	for _, h := range resp.Hits {
+		for _, kind := range hiringLabels {
+			if _, ok := found[kind.label]; ok {
+				continue
+			}
+			if !strings.Contains(h.Title, kind.match) {
+				continue
+			}
+			id, err := strconv.Atoi(h.ObjectID)
+			if err != nil {
+				continue
+			}
+			found[kind.label] = HiringThread{ID: id, Title: h.Title, Label: kind.label}
+		}
+		if len(found) == len(hiringLabels) {
+			break
+		}
+	}
+	out := make([]HiringThread, 0, len(hiringLabels))
+	for _, kind := range hiringLabels {
+		if th, ok := found[kind.label]; ok {
+			out = append(out, th)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("hn: no hiring thread found")
+	}
+	return out, nil
+}
+
+// LatestHiringThread returns the item ID of the most recent monthly
+// "Ask HN: Who is hiring?" thread.
+func (c *Client) LatestHiringThread(ctx context.Context) (int, error) {
+	threads, err := c.LatestHiringThreads(ctx)
+	if err != nil {
 		return 0, err
 	}
-	for _, h := range resp.Hits {
-		if strings.Contains(h.Title, "Who is hiring?") {
-			return strconv.Atoi(h.ObjectID)
+	for _, th := range threads {
+		if th.Label == "hiring" {
+			return th.ID, nil
 		}
 	}
 	return 0, fmt.Errorf("hn: no hiring thread found")

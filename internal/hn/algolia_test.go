@@ -48,6 +48,39 @@ func TestPastDiscussions(t *testing.T) {
 	}
 }
 
+func TestLatestHiringThreads(t *testing.T) {
+	c := newAlgoliaClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search_by_date" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(`{"hits":[
+			{"objectID":"901","title":"Ask HN: Who wants to be hired? (July 2026)"},
+			{"objectID":"900","title":"Ask HN: Freelancer? Seeking freelancer? (July 2026)"},
+			{"objectID":"902","title":"Ask HN: Who is hiring? (July 2026)"},
+			{"objectID":"903","title":"Ask HN: Who is hiring? (June 2026)"}
+		]}`))
+	})
+
+	got, err := c.LatestHiringThreads(context.Background())
+	if err != nil {
+		t.Fatalf("LatestHiringThreads: %v", err)
+	}
+	want := []HiringThread{
+		{ID: 902, Title: "Ask HN: Who is hiring? (July 2026)", Label: "hiring"},
+		{ID: 901, Title: "Ask HN: Who wants to be hired? (July 2026)", Label: "seeking"},
+		{ID: 900, Title: "Ask HN: Freelancer? Seeking freelancer? (July 2026)", Label: "freelance"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d threads, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("threads[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
 func TestLatestHiringThread(t *testing.T) {
 	c := newAlgoliaClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/search_by_date" {

@@ -34,10 +34,10 @@ jobs:
     # Only the leg marked optional above; the go.mod leg stays blocking.
     continue-on-error: ${{ matrix.optional == true }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Exactly one of these is set per leg; setup-go ignores the empty one.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: ${{ matrix.version_file }}
           go-version: ${{ matrix.version }}
@@ -62,7 +62,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Pinned to go.mod, and deliberately not matrixed the way the test job
       # is: golangci-lint cannot typecheck a standard library newer than the
@@ -70,7 +70,7 @@ jobs:
       # standard library on a release that has nothing to do with this
       # module. Bumping the go directive is the deliberate moment to check
       # the linter pin below still keeps up.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 

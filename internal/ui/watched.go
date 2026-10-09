@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -66,10 +68,23 @@ func (m watchedModel) start() (watchedModel, tea.Cmd) {
 		m.err = errors.New(storeUnavailable("watch list"))
 		return m, nil
 	}
+	if len(m.st.All()) == 0 {
+		m.loading = false
+		return m, nil
+	}
+	return m, tea.Batch(m.spinner.Tick, m.fetch())
+}
+
+// fetch loads current comment counts for every watched ID. The list stays
+// on screen until the reply arrives, so an unwatch refresh does not blank it.
+func (m *watchedModel) fetch() tea.Cmd {
+	if m.st == nil {
+		return nil
+	}
 	states := m.st.All()
 	if len(states) == 0 {
 		m.loading = false
-		return m, nil
+		return nil
 	}
 	ids := make([]int, len(states))
 	for i, ws := range states {
@@ -77,12 +92,12 @@ func (m watchedModel) start() (watchedModel, tea.Cmd) {
 	}
 	m.loading = true
 	client := m.client
-	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 		defer cancel()
 		items, err := client.ItemsFresh(ctx, ids)
 		return watchedDataMsg{items: items, err: err}
-	})
+	}
 }
 
 // visibleRows is how many stories fit below the header; as in the feed
@@ -114,6 +129,10 @@ func (m watchedModel) Update(msg tea.Msg) (watchedModel, tea.Cmd) {
 		if m.err != nil {
 			return m, nil
 		}
+		var selectedID int
+		if m.cursor < len(m.rows) {
+			selectedID = m.rows[m.cursor].item.ID
+		}
 		m.rows = m.rows[:0]
 		for _, it := range msg.items {
 			ws, ok := m.st.Get(it.ID)
@@ -126,8 +145,22 @@ func (m watchedModel) Update(msg tea.Msg) (watchedModel, tea.Cmd) {
 				newCount: max(0, it.Descendants-ws.LastComments),
 			})
 		}
-		if m.cursor >= len(m.rows) {
-			m.cursor = max(0, len(m.rows)-1)
+		// Most unread first: W is for catching up, not revisiting what was
+		// opened last. Equal unread counts keep the recent-read order.
+		slices.SortFunc(m.rows, func(a, b watchedRow) int {
+			if c := cmp.Compare(b.newCount, a.newCount); c != 0 {
+				return c
+			}
+			return cmp.Compare(b.state.LastReadAt, a.state.LastReadAt)
+		})
+		m.cursor = 0
+		if selectedID != 0 {
+			for i, r := range m.rows {
+				if r.item.ID == selectedID {
+					m.cursor = i
+					break
+				}
+			}
 		}
 		return m, nil
 
@@ -175,8 +208,13 @@ func (m watchedModel) Update(msg tea.Msg) (watchedModel, tea.Cmd) {
 				if m.cursor >= len(m.rows) {
 					m.cursor = max(0, len(m.rows)-1)
 				}
-				// The row goes now; the file catches up off the loop.
-				return m, saveStore(m.st)
+				// The row goes now; the file catches up off the loop. Remaining
+				// rows refetch so "+N new" is not left stale until the next r.
+				cmds := []tea.Cmd{saveStore(m.st)}
+				if len(m.rows) > 0 {
+					cmds = append(cmds, (&m).fetch())
+				}
+				return m, tea.Batch(cmds...)
 			}
 		}
 	}

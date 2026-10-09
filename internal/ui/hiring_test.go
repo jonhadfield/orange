@@ -282,3 +282,79 @@ func TestHiringFailureShowsRetryAdvice(t *testing.T) {
 		t.Errorf("failure view does not name the retry key:\n%s", view)
 	}
 }
+
+func TestHiringReentryKeepsSameThread(t *testing.T) {
+	m := hiringWith("Acme | Go")
+	m.thread = hn.Item{ID: 99, Title: "Ask HN: Who is hiring?"}
+	m.threads = []hn.HiringThread{{ID: 99, Title: m.thread.Title, Label: "hiring"}}
+	before := len(m.posts)
+
+	m, cmd := m.start()
+	if cmd == nil {
+		t.Fatal("re-entry produced no check command")
+	}
+	m, cmd = m.Update(hiringCheckMsg{threads: []hn.HiringThread{
+		{ID: 99, Title: "Ask HN: Who is hiring?", Label: "hiring"},
+	}})
+	if cmd != nil {
+		t.Fatal("same-thread check started a reload")
+	}
+	if len(m.posts) != before || m.thread.ID != 99 {
+		t.Errorf("same-thread check mutated state: posts=%d thread=%d", len(m.posts), m.thread.ID)
+	}
+}
+
+func TestHiringReentryReloadsNewerThread(t *testing.T) {
+	m := hiringWith("Acme | Go")
+	m.thread = hn.Item{ID: 99, Title: "Ask HN: Who is hiring?"}
+	m.threads = []hn.HiringThread{{ID: 99, Title: m.thread.Title, Label: "hiring"}}
+
+	m, cmd := m.Update(hiringCheckMsg{threads: []hn.HiringThread{
+		{ID: 100, Title: "Ask HN: Who is hiring? (newer)", Label: "hiring"},
+	}})
+	if cmd == nil {
+		t.Fatal("newer thread did not start a reload")
+	}
+	if m.thread.ID != 0 {
+		t.Errorf("thread was not reset before reload: %d", m.thread.ID)
+	}
+	if len(m.posts) != 0 {
+		t.Errorf("posts survived a newer-thread reload: %d", len(m.posts))
+	}
+	if !m.loading {
+		t.Error("reload did not mark the model as loading")
+	}
+}
+
+func TestHiringTabCyclesKinds(t *testing.T) {
+	m := hiringWith("Acme | Go")
+	m.thread = hn.Item{ID: 99, Title: "Ask HN: Who is hiring?"}
+	m.threads = []hn.HiringThread{
+		{ID: 99, Title: "Ask HN: Who is hiring?", Label: "hiring"},
+		{ID: 100, Title: "Ask HN: Who wants to be hired?", Label: "seeking"},
+		{ID: 101, Title: "Ask HN: Freelancer?", Label: "freelance"},
+	}
+
+	m, cmd := m.handleKey(keyPress("tab"))
+	if cmd == nil {
+		t.Fatal("tab did not start a reload")
+	}
+	if m.kind != 1 {
+		t.Errorf("kind = %d, want 1 (seeking)", m.kind)
+	}
+	if m.thread.ID != 0 || len(m.posts) != 0 {
+		t.Errorf("tab left old posts on screen: thread=%d posts=%d", m.thread.ID, len(m.posts))
+	}
+
+	// Simulate the seeking thread having loaded, then step back.
+	m.loading = false
+	m.thread = hn.Item{ID: 100}
+	m.posts = []hiringPost{{item: hn.Item{ID: 1}, headline: "x", textLow: "x"}}
+	m, cmd = m.handleKey(keyPress("shift+tab"))
+	if cmd == nil {
+		t.Fatal("shift+tab did not start a reload")
+	}
+	if m.kind != 0 {
+		t.Errorf("kind = %d, want 0 (hiring)", m.kind)
+	}
+}

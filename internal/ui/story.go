@@ -346,6 +346,10 @@ func (m storyModel) handleKey(msg tea.KeyPressMsg) (storyModel, tea.Cmd) {
 			(&m).renderContent()
 			(&m).ensureCursorVisible()
 		}
+	case key.Matches(msg, m.keys.NextNew):
+		(&m).jumpNextNew()
+	case key.Matches(msg, m.keys.Parent):
+		(&m).jumpParent()
 	default:
 		// Digits open the corresponding past discussion.
 		if s := msg.String(); len(s) == 1 && s[0] >= '1' && s[0] <= '9' {
@@ -356,6 +360,53 @@ func (m storyModel) handleKey(msg tea.KeyPressMsg) (storyModel, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// jumpNextNew moves the selection to the next comment newer than newSince,
+// wrapping once so a press after the last new comment starts again.
+func (m *storyModel) jumpNextNew() {
+	if m.newSince == 0 || len(m.nodes) == 0 {
+		return
+	}
+	isNew := func(n *commentNode) bool {
+		return !n.placeholder && n.item.Time > m.newSince
+	}
+	for i := m.cursor + 1; i < len(m.nodes); i++ {
+		if isNew(m.nodes[i]) {
+			m.cursor = i
+			m.renderContent()
+			m.ensureCursorVisible()
+			return
+		}
+	}
+	for i := range m.cursor + 1 {
+		if isNew(m.nodes[i]) {
+			m.cursor = i
+			m.renderContent()
+			m.ensureCursorVisible()
+			return
+		}
+	}
+}
+
+// jumpParent selects the parent of the current comment when it is still in
+// the visible tree. Top-level replies have the story as parent and stay put.
+func (m *storyModel) jumpParent() {
+	if m.tree == nil || m.cursor >= len(m.nodes) {
+		return
+	}
+	parentID := m.nodes[m.cursor].item.Parent
+	if parentID == 0 || parentID == m.tree.rootID {
+		return
+	}
+	for i, n := range m.nodes {
+		if n.item.ID == parentID {
+			m.cursor = i
+			m.renderContent()
+			m.ensureCursorVisible()
+			return
+		}
+	}
 }
 
 // cursorOffScreen reports whether the selected comment has been scrolled out

@@ -29,8 +29,10 @@ type hiringPost struct {
 }
 
 type hiringThreadMsg struct {
-	thread hn.Item
-	err    error
+	thread  hn.Item
+	threads []hn.HiringThread
+	kind    int
+	err     error
 }
 
 type hiringPostsMsg struct {
@@ -39,8 +41,16 @@ type hiringPostsMsg struct {
 	err      error
 }
 
-// hiringModel browses the latest monthly "Ask HN: Who is hiring?" thread
-// with keyword filtering over the job posts.
+// hiringCheckMsg is the soft re-entry probe: when H is pressed and a thread
+// is already loaded, ask Algolia for the latest monthly threads before
+// throwing away what is on screen.
+type hiringCheckMsg struct {
+	threads []hn.HiringThread
+	err     error
+}
+
+// hiringModel browses the monthly whoishiring threads (hiring, seeking,
+// freelance) with keyword filtering over the posts.
 type hiringModel struct {
 	client  *hn.Client
 	keys    keyMap
@@ -48,6 +58,8 @@ type hiringModel struct {
 	vp      viewport.Model
 	input   textinput.Model
 
+	threads   []hn.HiringThread
+	kind      int // index into threads
 	thread    hn.Item
 	queue     []int
 	posts     []hiringPost
@@ -87,23 +99,57 @@ func (m *hiringModel) setSize(w, h int) {
 func (m hiringModel) capturing() bool { return m.filtering }
 
 func (m hiringModel) start() (hiringModel, tea.Cmd) {
-	if m.thread.ID != 0 || m.loading {
-		return m, nil // already loaded this session
+	if m.loading {
+		return m, nil
 	}
+	if m.thread.ID != 0 {
+		// Keep the cached thread unless a newer monthly post has appeared.
+		client := m.client
+		return m, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+			defer cancel()
+			threads, err := client.LatestHiringThreads(ctx)
+			return hiringCheckMsg{threads: threads, err: err}
+		}
+	}
+	return m.beginLoad()
+}
+
+func (m hiringModel) beginLoad() (hiringModel, tea.Cmd) {
 	m.loading = true
 	m.warn = ""
 	m.err = nil
-	client := m.client
+	client, threads, kind := m.client, m.threads, m.kind
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 		defer cancel()
-		id, err := client.LatestHiringThread(ctx)
-		if err != nil {
-			return hiringThreadMsg{err: err}
+		if len(threads) == 0 {
+			var err error
+			threads, err = client.LatestHiringThreads(ctx)
+			if err != nil {
+				return hiringThreadMsg{err: err}
+			}
 		}
-		th, err := client.Item(ctx, id)
-		return hiringThreadMsg{thread: th, err: err}
+		if kind >= len(threads) {
+			kind = 0
+		}
+		th, err := client.Item(ctx, threads[kind].ID)
+		return hiringThreadMsg{thread: th, threads: threads, kind: kind, err: err}
 	})
+}
+
+// reset clears the loaded posts so the next beginLoad fetches afresh.
+// The kind selection and thread catalogue are kept.
+func (m *hiringModel) reset() {
+	m.thread = hn.Item{}
+	m.posts = nil
+	m.visible = nil
+	m.queue = nil
+	m.expanded = map[int]bool{}
+	m.cursor = 0
+	m.lineOf = m.lineOf[:0]
+	m.warn = ""
+	m.err = nil
 }
 
 func (m hiringModel) selected() (hn.Item, bool) {
@@ -141,11 +187,30 @@ func (m hiringModel) Update(msg tea.Msg) (hiringModel, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 
+	case hiringCheckMsg:
+		if msg.err != nil || len(msg.threads) == 0 {
+			// Soft probe failed: keep what is on screen.
+			return m, nil
+		}
+		m.threads = msg.threads
+		if m.kind >= len(m.threads) {
+			m.kind = 0
+		}
+		if m.threads[m.kind].ID == m.thread.ID {
+			return m, nil
+		}
+		(&m).reset()
+		return m.beginLoad()
+
 	case hiringThreadMsg:
 		if msg.err != nil {
 			m.loading = false
 			m.err = msg.err
 			return m, nil
+		}
+		if len(msg.threads) > 0 {
+			m.threads = msg.threads
+			m.kind = msg.kind
 		}
 		m.thread = msg.thread
 		m.queue = append([]int(nil), msg.thread.Kids...)
@@ -284,16 +349,23 @@ func (m hiringModel) handleKey(msg tea.KeyPressMsg) (hiringModel, tea.Cmd) {
 		m.filtering = true
 		m.input.Focus()
 		return m, textinput.Blink
+	case key.Matches(msg, m.keys.NextFeed):
+		if !m.loading && len(m.threads) > 1 {
+			m.kind = (m.kind + 1) % len(m.threads)
+			(&m).reset()
+			return m.beginLoad()
+		}
+	case key.Matches(msg, m.keys.PrevFeed):
+		if !m.loading && len(m.threads) > 1 {
+			m.kind = (m.kind + len(m.threads) - 1) % len(m.threads)
+			(&m).reset()
+			return m.beginLoad()
+		}
 	case key.Matches(msg, m.keys.Refresh):
 		if !m.loading {
-			m.thread = hn.Item{}
-			m.posts = nil
-			m.visible = nil
-			m.queue = nil
-			m.expanded = map[int]bool{}
-			m.cursor = 0
-			m.lineOf = m.lineOf[:0]
-			return m.start() // keeps the current filter text
+			m.threads = nil
+			(&m).reset()
+			return m.beginLoad() // keeps the current filter text
 		}
 	}
 	return m, nil
@@ -431,6 +503,9 @@ func (m hiringModel) View() string {
 		counts = strings.TrimSpace(counts + " " + m.spinner.View() + " loading…")
 	}
 	left := styleLogo.Render("HN") + styleTabActive.Render("Hiring")
+	if kinds := m.kindTabs(); kinds != "" {
+		left += " " + kinds
+	}
 	flex := styleHeaderTitle.Render(title)
 	if counts != "" {
 		flex += "  " + styleMeta.Render(counts)
@@ -462,4 +537,22 @@ func (m hiringModel) View() string {
 	}
 
 	return barWithFlex(left, flex, m.vp.Width(), viewHiring) + "\n\n" + body + "\n" + footer
+}
+
+// kindTabs renders the hiring/seeking/freelance switcher, with the active
+// kind highlighted the way the feed tabs highlight the current feed.
+func (m hiringModel) kindTabs() string {
+	if len(m.threads) < 2 {
+		return ""
+	}
+	parts := make([]string, 0, len(m.threads))
+	for i, th := range m.threads {
+		label := th.Label
+		if i == m.kind {
+			parts = append(parts, styleTabActive.Render(label))
+		} else {
+			parts = append(parts, styleTab.Render(label))
+		}
+	}
+	return strings.Join(parts, " ")
 }
