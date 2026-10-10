@@ -38,7 +38,9 @@ type pulseDataMsg struct {
 	err   error
 }
 
-type pulseTickMsg struct{}
+// pulseTickMsg is the refresh timer firing. gen says which timer it was:
+// only the most recently scheduled one may refresh.
+type pulseTickMsg struct{ gen int }
 
 // pulseModel is the auto-refreshing live view of the front page, showing
 // rank movement and score/comment velocity between refreshes.
@@ -59,6 +61,14 @@ type pulseModel struct {
 	width       int
 	height      int
 	refreshedAt time.Time
+	// tickGen numbers the refresh timers. Scheduling one makes any older
+	// timer stale, so a reading asked for by r or by re-entering Pulse
+	// replaces the pending timer instead of starting a second loop.
+	tickGen int
+	// tickPending is whether the current timer has yet to fire. It is
+	// cleared when the timer is dropped because Pulse was not on screen,
+	// which is how resume knows the loop has stopped.
+	tickPending bool
 }
 
 func newPulseModel(client *hn.Client, keys keyMap) pulseModel {
@@ -106,8 +116,31 @@ func (m pulseModel) selected() (hn.Item, bool) {
 	return hn.Item{}, false
 }
 
-func schedulePulseTick() tea.Cmd {
-	return tea.Tick(pulseInterval, func(time.Time) tea.Msg { return pulseTickMsg{} })
+// scheduleTick starts the timer for the next refresh, retiring any other.
+func (m *pulseModel) scheduleTick() tea.Cmd {
+	m.tickGen++
+	m.tickPending = true
+	gen := m.tickGen
+	return tea.Tick(pulseInterval, func(time.Time) tea.Msg { return pulseTickMsg{gen: gen} })
+}
+
+// dropTick is the root model discarding a timer that fired while Pulse was
+// not on screen. Nothing refreshes in the background, so if it was the
+// current timer the refresh loop has stopped until resume.
+func (m pulseModel) dropTick(msg pulseTickMsg) pulseModel {
+	if msg.gen == m.tickGen {
+		m.tickPending = false
+	}
+	return m
+}
+
+// resume restarts refreshing on returning to Pulse, if its timer was
+// dropped while the reader was away. A timer still pending is left to fire.
+func (m pulseModel) resume() (pulseModel, tea.Cmd) {
+	if m.tickPending {
+		return m, nil
+	}
+	return m.start()
 }
 
 func (m pulseModel) Update(msg tea.Msg) (pulseModel, tea.Cmd) {
@@ -121,7 +154,12 @@ func (m pulseModel) Update(msg tea.Msg) (pulseModel, tea.Cmd) {
 		return m, cmd
 
 	case pulseTickMsg:
+		if msg.gen != m.tickGen {
+			return m, nil // retired by a later timer
+		}
+		m.tickPending = false
 		if m.loading {
+			// The reading under way schedules the next timer.
 			return m, nil
 		}
 		m.loading = true
@@ -132,12 +170,12 @@ func (m pulseModel) Update(msg tea.Msg) (pulseModel, tea.Cmd) {
 		had := len(m.rows) > 0
 		m.warn, m.err = applyFetchErr(msg.err, len(msg.items) > 0, had, "stories")
 		if m.err != nil {
-			return m, schedulePulseTick()
+			return m, m.scheduleTick()
 		}
 		if len(msg.items) == 0 {
 			// A soft failure with nothing new: keep the previous reading
 			// on screen rather than blanking the view.
-			return m, schedulePulseTick()
+			return m, m.scheduleTick()
 		}
 		next := make(map[int]pulseSample, len(msg.items))
 		rows := make([]pulseRow, 0, len(msg.items))
@@ -161,7 +199,7 @@ func (m pulseModel) Update(msg tea.Msg) (pulseModel, tea.Cmd) {
 			m.cursor = max(0, len(rows)-1)
 		}
 		m.refreshedAt = time.Now()
-		return m, schedulePulseTick()
+		return m, m.scheduleTick()
 
 	case tea.MouseWheelMsg:
 		switch msg.Button {

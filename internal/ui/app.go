@@ -187,7 +187,9 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case pulseTickMsg:
 		if m.view != viewPulse {
-			return m, nil // stop refreshing once the view is left
+			// Stop refreshing once the view is left; resume restarts it.
+			m.pulse = m.pulse.dropTick(msg)
+			return m, nil
 		}
 		var cmd tea.Cmd
 		m.pulse, cmd = m.pulse.Update(msg)
@@ -267,6 +269,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		switch m.view {
 		case viewStory:
 			m.view = m.prevView
+			if m.view == viewPulse {
+				var cmd tea.Cmd
+				m.pulse, cmd = m.pulse.resume()
+				return m, cmd
+			}
 		case viewPulse, viewWatched, viewHiring, viewSearch:
 			m.view = viewFeeds
 		}
