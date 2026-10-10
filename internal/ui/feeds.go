@@ -50,8 +50,15 @@ var feedNames = map[hn.Feed]string{
 // feedState is the loaded contents and cursor position of one feed, kept
 // around so switching between feeds is instant.
 type feedState struct {
-	ids     []int
-	items   []hn.Item
+	ids   []int
+	items []hn.Item
+	// ranks holds each item's 1-based position in ids. It differs from the
+	// item's index once a story has failed to load and left a gap.
+	ranks []int
+	// next is the index in ids where the next page starts. It counts IDs
+	// requested, not items received, so a partly failed page does not make
+	// the next one ask for the same stories again.
+	next    int
 	cursor  int
 	loading bool
 	warn    string
@@ -67,6 +74,7 @@ type feedIDsMsg struct {
 type feedItemsMsg struct {
 	feed   hn.Feed
 	offset int
+	ids    []int // the IDs requested, starting at offset
 	items  []hn.Item
 	err    error
 }
@@ -128,10 +136,10 @@ func (m feedsModel) loadFeed(feed hn.Feed) tea.Cmd {
 
 func (m feedsModel) loadMore(feed hn.Feed) tea.Cmd {
 	st := m.states[feed]
-	if st.loading || st.err != nil || len(st.items) >= len(st.ids) {
+	if st.loading || st.err != nil || st.next >= len(st.ids) {
 		return nil
 	}
-	offset := len(st.items)
+	offset := st.next
 	end := min(offset+storyPageSize, len(st.ids))
 	ids := append([]int(nil), st.ids[offset:end]...)
 	st.loading = true
@@ -142,7 +150,7 @@ func (m feedsModel) loadMore(feed hn.Feed) tea.Cmd {
 		// Always bypass the item cache: pages are usually new IDs, and
 		// after a refresh cached scores would be stale.
 		items, err := client.ItemsFresh(ctx, ids)
-		return feedItemsMsg{feed: feed, offset: offset, items: items, err: err}
+		return feedItemsMsg{feed: feed, offset: offset, ids: ids, items: items, err: err}
 	}
 }
 
@@ -196,14 +204,14 @@ func (m feedsModel) Update(msg tea.Msg) (feedsModel, tea.Cmd) {
 	case feedItemsMsg:
 		st := m.states[msg.feed]
 		st.loading = false
-		if msg.offset != len(st.items) {
+		if msg.offset != st.next {
 			return m, nil
 		}
 		st.warn = ""
 		st.err = nil
-		if len(msg.items) > 0 {
-			st.items = append(st.items, msg.items...)
-		}
+		st.items = append(st.items, msg.items...)
+		st.ranks = append(st.ranks, pageRanks(msg)...)
+		st.next = msg.offset + max(len(msg.ids), len(msg.items))
 		st.warn, st.err = applyFetchErr(msg.err, len(msg.items) > 0, len(st.items) > 0, "stories")
 		return m, nil
 
@@ -383,6 +391,35 @@ func (m feedsModel) tabs(budget int) []string {
 	return out
 }
 
+// pageRanks gives each item in a page its 1-based position in the feed.
+// Items come back in the order requested, minus any that failed, so walking
+// the requested IDs alongside them finds where each one sits.
+func pageRanks(msg feedItemsMsg) []int {
+	ranks := make([]int, len(msg.items))
+	j := 0
+	for k, it := range msg.items {
+		for j < len(msg.ids) && msg.ids[j] != it.ID {
+			j++
+		}
+		if j == len(msg.ids) {
+			// Not among the requested IDs; fall back to arrival order.
+			ranks[k] = msg.offset + k + 1
+			continue
+		}
+		ranks[k] = msg.offset + j + 1
+		j++
+	}
+	return ranks
+}
+
+// rank is the feed position shown beside item i.
+func (st *feedState) rank(i int) int {
+	if i < len(st.ranks) {
+		return st.ranks[i]
+	}
+	return i + 1
+}
+
 func (m feedsModel) rows(st *feedState) string {
 	visible := m.visibleRows()
 	start := 0
@@ -426,7 +463,7 @@ func (m feedsModel) rows(st *feedState) string {
 		}
 		line1 := cur
 		if showRank {
-			line1 += styleMeta.Render(fmt.Sprintf("%3d.", i+1)) + " "
+			line1 += styleMeta.Render(fmt.Sprintf("%3d.", st.rank(i))) + " "
 		}
 		line1 += badge + " " + titleStyle.Render(title)
 		if d := domain(it.URL); d != "" {
