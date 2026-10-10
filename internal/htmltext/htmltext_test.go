@@ -106,13 +106,28 @@ func TestConvertMalformed(t *testing.T) {
 			want: "a\n\n    x := 1\n    y := 2",
 		},
 		{
-			// Pre-existing and unrelated to the unclosed tag: convert ends
-			// with TrimSpace, so a block at the very start of the input
-			// loses its first line's indent. Pinned here so a later fix is
-			// a deliberate change rather than a surprise.
-			name: "a block at the very start loses its first indent",
+			// A block at the very start keeps its first line's indent,
+			// like every other line of it. Trimming all leading
+			// whitespace used to strip it, so the block no longer read
+			// as code and its indentation was wrong.
+			name: "a block at the very start keeps its first indent",
 			in:   "<pre><code>x := 1\ny := 2\n</code></pre>",
-			want: "x := 1\n    y := 2",
+			want: "    x := 1\n    y := 2",
+		},
+		{
+			name: "code's own indent survives at the very start",
+			in:   "<pre><code>  if x:\n    y()\n</code></pre><p>after",
+			want: "      if x:\n        y()\n\nafter",
+		},
+		{
+			name: "whitespace before a leading block is not added to it",
+			in:   " \n<pre><code>x := 1</code></pre>",
+			want: "    x := 1",
+		},
+		{
+			name: "prose still loses its leading whitespace",
+			in:   "  hello <i>there</i>",
+			want: "hello _there_",
 		},
 		{
 			name: "text after an unclosed link is not lost",

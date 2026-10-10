@@ -79,6 +79,9 @@ func convert(src string, linkify bool) string {
 		href   string
 		inLink bool
 		inPre  bool
+		// leadingPre is set when the text opens with a code block, whose
+		// first-line indent the final trim has to leave alone.
+		leadingPre bool
 	)
 
 	dst := func() *strings.Builder {
@@ -120,6 +123,12 @@ func convert(src string, linkify bool) string {
 
 	flushPre := func() {
 		inPre = false
+		if strings.TrimSpace(out.String()) == "" {
+			// Nothing but whitespace before the block, which must not be
+			// added to its indent.
+			out.Reset()
+			leadingPre = true
+		}
 		out.WriteString(indent(strings.TrimRight(pre.String(), "\n"), "    "))
 		out.WriteString("\n")
 	}
@@ -188,6 +197,11 @@ func convert(src string, linkify bool) string {
 	result := out.String()
 	for strings.Contains(result, "\n\n\n") {
 		result = strings.ReplaceAll(result, "\n\n\n", "\n\n")
+	}
+	if leadingPre {
+		// Only the blank lines: the spaces in front of the first line are
+		// the block's indent, there on every other line of it.
+		return strings.TrimRight(strings.TrimLeft(result, "\n"), " \t\n")
 	}
 	return strings.TrimSpace(result)
 }

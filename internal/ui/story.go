@@ -575,7 +575,7 @@ func (m *storyModel) header(now time.Time) string {
 	}
 	if m.story.Text != "" {
 		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Width(w).Render(htmltext.ConvertLinked(m.story.Text)))
+		b.WriteString(lipgloss.NewStyle().Width(w).Render(wrapText(htmltext.ConvertLinked(m.story.Text), w)))
 		b.WriteString("\n")
 	}
 	b.WriteString(styleRule.Render(strings.Repeat("─", max(1, w))))
@@ -632,7 +632,7 @@ func (m *storyModel) renderNode(n *commentNode, selected bool, now time.Time) st
 		// worth reading — except on a terminal narrower than that cap, where
 		// the terminal wins.
 		wrapWidth := max(1, m.vp.Width()-indentWidth-1)
-		block += "\n" + lipgloss.NewStyle().Width(wrapWidth).Render(n.text)
+		block += "\n" + lipgloss.NewStyle().Width(wrapWidth).Render(wrapText(n.text, wrapWidth))
 	}
 
 	return prefixLines(block, guide) + "\n\n"

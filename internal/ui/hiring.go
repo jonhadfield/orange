@@ -493,7 +493,8 @@ func (m *hiringModel) renderContent() {
 		line++
 
 		if m.expanded[p.item.ID] {
-			body := lipgloss.NewStyle().Width(max(20, m.vp.Width()-4)).Render(p.textLinked)
+			bodyWidth := max(20, m.vp.Width()-4)
+			body := lipgloss.NewStyle().Width(bodyWidth).Render(wrapText(p.textLinked, bodyWidth))
 			meta := styleMeta.Render(fmt.Sprintf("— %s · %s · o opens on HN", p.item.By, relAge(p.item.Time, now)))
 			block := prefixLines(body+"\n"+meta, "    ")
 			b.WriteString(block + "\n")
