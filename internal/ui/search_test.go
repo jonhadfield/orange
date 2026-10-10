@@ -259,7 +259,7 @@ func TestEnterOpensASearchResult(t *testing.T) {
 	}
 	next, _ = next.Update(cmd())
 	// What the fetch returns: the whole story, which the result was not.
-	next, cmd = next.Update(itemLoadedMsg{item: hn.Item{
+	next, cmd = next.Update(itemLoadedMsg{seq: next.(Model).openSeq, item: hn.Item{
 		ID: 7, Type: "story", Title: "A found story", Text: "body", Kids: []int{70},
 	}})
 	root := next.(Model)

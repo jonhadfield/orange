@@ -39,6 +39,7 @@ const (
 
 type commentsMsg struct {
 	storyID int
+	gen     int
 	items   []hn.Item
 	err     error
 }
@@ -46,12 +47,14 @@ type commentsMsg struct {
 // treeMsg carries the whole comment tree fetched from Algolia in one request.
 type treeMsg struct {
 	storyID int
+	gen     int
 	items   []hn.Item
 	err     error
 }
 
 type pastMsg struct {
 	storyID int
+	gen     int
 	list    []hn.PastDiscussion
 }
 
@@ -69,6 +72,10 @@ type storyModel struct {
 	queue    []int        // comment IDs waiting to be fetched
 	queued   map[int]bool // every ID ever queued, so nothing is fetched twice
 	inflight int          // batches currently in flight
+	// gen numbers each open. Replies carry the gen they were started
+	// under, so batches from an earlier open of the same story are told
+	// apart from the current load and ignored.
+	gen      int
 	past     []hn.PastDiscussion
 	newSince int64 // comments after this time are marked new (0 = off)
 	loading  bool
@@ -102,6 +109,7 @@ func (m *storyModel) setSize(w, h int) {
 // comment thread and any past discussions of the same URL. Comments newer
 // than newSince are highlighted (0 disables highlighting).
 func (m storyModel) open(it hn.Item, newSince int64) (storyModel, tea.Cmd) {
+	m.gen++
 	m.story = it
 	m.tree = newCommentTree(it.ID)
 	m.queue = nil
@@ -123,12 +131,12 @@ func (m storyModel) open(it hn.Item, newSince int64) (storyModel, tea.Cmd) {
 // their replies and trails the live site — so the Firebase pass still runs
 // behind it to fill the gaps.
 func (m *storyModel) fetchTree() tea.Cmd {
-	client, id := m.client, m.story.ID
+	client, id, gen := m.client, m.story.ID, m.gen
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 		defer cancel()
 		items, err := client.ItemTree(ctx, id)
-		return treeMsg{storyID: id, items: items, err: err}
+		return treeMsg{storyID: id, gen: gen, items: items, err: err}
 	}
 }
 
@@ -138,15 +146,15 @@ func (m *storyModel) fetchPast() tea.Cmd {
 	if m.story.URL == "" {
 		return nil
 	}
-	client, storyURL, id := m.client, m.story.URL, m.story.ID
+	client, storyURL, id, gen := m.client, m.story.URL, m.story.ID, m.gen
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 		defer cancel()
 		list, err := client.PastDiscussions(ctx, storyURL, id)
 		if err != nil {
-			return pastMsg{storyID: id}
+			return pastMsg{storyID: id, gen: gen}
 		}
-		return pastMsg{storyID: id, list: list}
+		return pastMsg{storyID: id, gen: gen, list: list}
 	}
 }
 
@@ -189,12 +197,12 @@ func (m *storyModel) nextBatch() tea.Cmd {
 	m.queue = m.queue[n:]
 	m.loading = true
 	m.inflight++
-	client, storyID := m.client, m.story.ID
+	client, storyID, gen := m.client, m.story.ID, m.gen
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 		defer cancel()
 		items, err := client.Items(ctx, ids)
-		return commentsMsg{storyID: storyID, items: items, err: err}
+		return commentsMsg{storyID: storyID, gen: gen, items: items, err: err}
 	}
 }
 
@@ -209,7 +217,7 @@ func (m storyModel) Update(msg tea.Msg) (storyModel, tea.Cmd) {
 		return m, cmd
 
 	case pastMsg:
-		if msg.storyID != m.story.ID || len(msg.list) == 0 {
+		if msg.storyID != m.story.ID || msg.gen != m.gen || len(msg.list) == 0 {
 			return m, nil
 		}
 		m.past = msg.list
@@ -217,7 +225,7 @@ func (m storyModel) Update(msg tea.Msg) (storyModel, tea.Cmd) {
 		return m, nil
 
 	case treeMsg:
-		if m.tree == nil || msg.storyID != m.story.ID {
+		if m.tree == nil || msg.storyID != m.story.ID || msg.gen != m.gen {
 			return m, nil
 		}
 		if msg.err == nil {
@@ -231,7 +239,7 @@ func (m storyModel) Update(msg tea.Msg) (storyModel, tea.Cmd) {
 		return m, (&m).fillBatches()
 
 	case commentsMsg:
-		if m.tree == nil || msg.storyID != m.story.ID {
+		if m.tree == nil || msg.storyID != m.story.ID || msg.gen != m.gen {
 			return m, nil
 		}
 		m.inflight--

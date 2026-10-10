@@ -37,7 +37,10 @@ const (
 
 type browserOpenedMsg struct{ err error }
 
+// itemLoadedMsg is a story fetched for opening. seq is the open request it
+// answers; see Model.openSeq.
 type itemLoadedMsg struct {
+	seq  int
 	item hn.Item
 	err  error
 }
@@ -56,6 +59,13 @@ type Model struct {
 	search   searchModel
 	view     view
 	prevView view // where esc from the story view returns to
+	// openSeq numbers requests to fetch and open a story. Opening another
+	// story or pressing esc moves it on, so a reply that arrives after the
+	// reader has gone elsewhere is recognised as out of date and dropped.
+	openSeq int
+	// openFrom is the view the current open request was made from. The
+	// reply is applied only if the reader is still there.
+	openFrom view
 	width    int
 	height   int
 	notice   string
@@ -157,18 +167,23 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case openItemMsg:
-		client, id := m.client, msg.id
+		m.openSeq++
+		m.openFrom = m.view
+		client, id, seq := m.client, msg.id, m.openSeq
 		return m, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 			defer cancel()
 			items, err := client.ItemsFresh(ctx, []int{id})
 			if err != nil || len(items) == 0 {
-				return itemLoadedMsg{err: fmt.Errorf("item %d unavailable: %w", id, err)}
+				return itemLoadedMsg{seq: seq, err: fmt.Errorf("item %d unavailable: %w", id, err)}
 			}
-			return itemLoadedMsg{item: items[0]}
+			return itemLoadedMsg{seq: seq, item: items[0]}
 		}
 
 	case itemLoadedMsg:
+		if msg.seq != m.openSeq || m.view != m.openFrom {
+			return m, nil // the reader has moved on
+		}
 		if msg.err != nil {
 			m.setNotice("could not load story: "+msg.err.Error(), false)
 			return m, nil
@@ -266,6 +281,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.help.ShowAll = false
 			return m, nil
 		}
+		m.openSeq++ // whatever was being opened is no longer wanted
 		switch m.view {
 		case viewStory:
 			m.view = m.prevView
@@ -364,6 +380,7 @@ func (m Model) delegate(msg tea.Msg) (Model, tea.Cmd) {
 // openStory switches to the story view. For watched stories the previous
 // read position highlights new comments, and the read marker advances.
 func (m Model) openStory(it hn.Item, from view) (Model, tea.Cmd) {
+	m.openSeq++ // supersedes any story still being fetched
 	if from != viewStory {
 		m.prevView = from
 	}

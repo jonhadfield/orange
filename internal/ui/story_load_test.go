@@ -28,7 +28,7 @@ func TestStoryTreeMsgStartsFirebaseReconcile(t *testing.T) {
 	(&m).setSize(80, 24)
 
 	m, cmd := m.Update(treeMsg{
-		storyID: 100,
+		storyID: 100, gen: m.gen,
 		items: []hn.Item{
 			{ID: 1, Type: "comment", Parent: 100, By: "a", Text: "from algolia"},
 		},
@@ -52,11 +52,11 @@ func TestStoryCommentsMsgKeepsPartialBatch(t *testing.T) {
 	m, _ = m.open(hn.Item{ID: 100, Title: "a story", Descendants: 3, Kids: []int{1}}, 0)
 	(&m).setSize(80, 24)
 	// Simulate the Algolia pass finishing so the queue is live.
-	m, _ = m.Update(treeMsg{storyID: 100, err: errors.New("algolia down")})
+	m, _ = m.Update(treeMsg{storyID: 100, gen: m.gen, err: errors.New("algolia down")})
 	m.inflight = 1
 
 	m, _ = m.Update(commentsMsg{
-		storyID: 100,
+		storyID: 100, gen: m.gen,
 		items: []hn.Item{
 			{ID: 1, Type: "comment", Parent: 100, By: "a", Text: "kept", Kids: []int{2}},
 		},
@@ -84,13 +84,13 @@ func TestStoryIgnoresStaleCommentsMsg(t *testing.T) {
 	m := newStoryModel(hn.NewClient("http://unused.invalid"), newKeyMap())
 	m, _ = m.open(hn.Item{ID: 100, Title: "a story", Descendants: 1, Kids: []int{1}}, 0)
 	(&m).setSize(80, 24)
-	m, _ = m.Update(treeMsg{storyID: 100})
+	m, _ = m.Update(treeMsg{storyID: 100, gen: m.gen})
 	before := m.tree.count
 	m.inflight = 1
 
 	m, cmd := m.Update(commentsMsg{
-		storyID: 999,
-		items:   []hn.Item{{ID: 1, Type: "comment", Parent: 100, Text: "stale"}},
+		storyID: 999, gen: m.gen,
+		items: []hn.Item{{ID: 1, Type: "comment", Parent: 100, Text: "stale"}},
 	})
 	if cmd != nil {
 		t.Error("stale commentsMsg started more work")
@@ -110,7 +110,7 @@ func TestPastDiscussionsAppearInHeader(t *testing.T) {
 	m := pastStory(t)
 
 	m, _ = m.Update(pastMsg{
-		storyID: 100,
+		storyID: 100, gen: m.gen,
 		list: []hn.PastDiscussion{
 			{ID: 200, Comments: 450, Points: 300, Time: 1_600_000_000},
 			{ID: 201, Comments: 12, Points: 40, Time: 1_650_000_000},
@@ -134,16 +134,16 @@ func TestPastDiscussionsAppearInHeader(t *testing.T) {
 func TestPastDiscussionsIgnoreStaleOrEmpty(t *testing.T) {
 	m := pastStory(t)
 	m, _ = m.Update(pastMsg{
-		storyID: 100,
-		list:    []hn.PastDiscussion{{ID: 200, Comments: 10, Points: 5}},
+		storyID: 100, gen: m.gen,
+		list: []hn.PastDiscussion{{ID: 200, Comments: 10, Points: 5}},
 	})
 
-	m, _ = m.Update(pastMsg{storyID: 999, list: []hn.PastDiscussion{{ID: 300}}})
+	m, _ = m.Update(pastMsg{storyID: 999, gen: m.gen, list: []hn.PastDiscussion{{ID: 300}}})
 	if len(m.past) != 1 || m.past[0].ID != 200 {
 		t.Fatalf("stale pastMsg mutated past: %+v", m.past)
 	}
 
-	m, _ = m.Update(pastMsg{storyID: 100})
+	m, _ = m.Update(pastMsg{storyID: 100, gen: m.gen})
 	if len(m.past) != 1 {
 		t.Fatalf("empty pastMsg cleared the list: %+v", m.past)
 	}
@@ -155,7 +155,7 @@ func TestPastDiscussionsIgnoreStaleOrEmpty(t *testing.T) {
 func TestPastDigitOpensDiscussion(t *testing.T) {
 	m := pastStory(t)
 	m, _ = m.Update(pastMsg{
-		storyID: 100,
+		storyID: 100, gen: m.gen,
 		list: []hn.PastDiscussion{
 			{ID: 200, Comments: 450, Points: 300},
 			{ID: 201, Comments: 12, Points: 40},
