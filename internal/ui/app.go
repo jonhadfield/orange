@@ -309,9 +309,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.toggleWatch()
 
 	case key.Matches(msg, m.keys.Open) && (m.view == viewFeeds || m.view == viewPulse || m.view == viewWatched || m.view == viewSearch):
-		// A comment result knows only which story it was written under, so
-		// the story is fetched before it is opened. Opening the stub would
-		// show a header with no author, no score and no age.
+		// A search result is only part of a story, so the story is fetched
+		// before it is opened. A comment result would show a header with
+		// no author, score or age; a story result would have no body text
+		// and leave the comments to the search index's copy of the thread.
 		if id, ok := m.search.openTarget(); ok && m.view == viewSearch {
 			m.prevView = viewSearch
 			return m, func() tea.Msg { return openItemMsg{id: id} }

@@ -122,14 +122,11 @@ func (m searchModel) selected() (hn.Item, bool) {
 	return hn.Item{}, false
 }
 
-// openTarget is the story id that has to be fetched before opening, for a
-// result that carries only an id and a title rather than a whole story. A
-// story result is already complete, so it reports false and is opened
-// directly.
+// openTarget is the story id to fetch before opening the selected result.
+// No result is a whole story: a comment result carries only its story's id
+// and title, and a story result, built from the search index, has no
+// comment IDs and no body text.
 func (m searchModel) openTarget() (int, bool) {
-	if m.mode != searchComments {
-		return 0, false
-	}
 	it, ok := m.selected()
 	return it.ID, ok
 }
