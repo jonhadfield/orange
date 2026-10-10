@@ -29,6 +29,7 @@ type hiringPost struct {
 }
 
 type hiringThreadMsg struct {
+	gen     int
 	thread  hn.Item
 	threads []hn.HiringThread
 	kind    int
@@ -36,6 +37,7 @@ type hiringThreadMsg struct {
 }
 
 type hiringPostsMsg struct {
+	gen      int
 	threadID int
 	items    []hn.Item
 	err      error
@@ -45,6 +47,7 @@ type hiringPostsMsg struct {
 // is already loaded, ask Algolia for the latest monthly threads before
 // throwing away what is on screen.
 type hiringCheckMsg struct {
+	gen     int
 	threads []hn.HiringThread
 	err     error
 }
@@ -71,6 +74,10 @@ type hiringModel struct {
 	loading   bool
 	warn      string
 	err       error
+	// gen numbers each load. The probe and every load reply carry the gen
+	// they were started under, so a reply overtaken by tab or r is ignored
+	// instead of starting a second load beside the current one.
+	gen int
 }
 
 func newHiringModel(client *hn.Client, keys keyMap) hiringModel {
@@ -104,22 +111,23 @@ func (m hiringModel) start() (hiringModel, tea.Cmd) {
 	}
 	if m.thread.ID != 0 {
 		// Keep the cached thread unless a newer monthly post has appeared.
-		client := m.client
+		client, gen := m.client, m.gen
 		return m, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 			defer cancel()
 			threads, err := client.LatestHiringThreads(ctx)
-			return hiringCheckMsg{threads: threads, err: err}
+			return hiringCheckMsg{gen: gen, threads: threads, err: err}
 		}
 	}
 	return m.beginLoad()
 }
 
 func (m hiringModel) beginLoad() (hiringModel, tea.Cmd) {
+	m.gen++
 	m.loading = true
 	m.warn = ""
 	m.err = nil
-	client, threads, kind := m.client, m.threads, m.kind
+	client, threads, kind, gen := m.client, m.threads, m.kind, m.gen
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 		defer cancel()
@@ -127,14 +135,19 @@ func (m hiringModel) beginLoad() (hiringModel, tea.Cmd) {
 			var err error
 			threads, err = client.LatestHiringThreads(ctx)
 			if err != nil {
-				return hiringThreadMsg{err: err}
+				return hiringThreadMsg{gen: gen, err: err}
 			}
 		}
 		if kind >= len(threads) {
 			kind = 0
 		}
-		th, err := client.Item(ctx, threads[kind].ID)
-		return hiringThreadMsg{thread: th, threads: threads, kind: kind, err: err}
+		// Fresh, not cached: the thread's list of posts is what grows, and
+		// a cached copy would leave r showing only the posts seen first.
+		items, err := client.ItemsFresh(ctx, []int{threads[kind].ID})
+		if err != nil {
+			return hiringThreadMsg{gen: gen, err: err}
+		}
+		return hiringThreadMsg{gen: gen, thread: items[0], threads: threads, kind: kind}
 	})
 }
 
@@ -168,12 +181,12 @@ func (m *hiringModel) nextBatch() tea.Cmd {
 	ids := append([]int(nil), m.queue[:n]...)
 	m.queue = m.queue[n:]
 	m.loading = true
-	client, threadID := m.client, m.thread.ID
+	client, threadID, gen := m.client, m.thread.ID, m.gen
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 		defer cancel()
 		items, err := client.Items(ctx, ids)
-		return hiringPostsMsg{threadID: threadID, items: items, err: err}
+		return hiringPostsMsg{gen: gen, threadID: threadID, items: items, err: err}
 	}
 }
 
@@ -188,6 +201,10 @@ func (m hiringModel) Update(msg tea.Msg) (hiringModel, tea.Cmd) {
 		return m, cmd
 
 	case hiringCheckMsg:
+		if msg.gen != m.gen || m.loading {
+			// Overtaken: tab or r has started a load since the probe went.
+			return m, nil
+		}
 		if msg.err != nil || len(msg.threads) == 0 {
 			// Soft probe failed: keep what is on screen.
 			return m, nil
@@ -203,6 +220,9 @@ func (m hiringModel) Update(msg tea.Msg) (hiringModel, tea.Cmd) {
 		return m.beginLoad()
 
 	case hiringThreadMsg:
+		if msg.gen != m.gen {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.loading = false
 			m.err = msg.err
@@ -217,7 +237,7 @@ func (m hiringModel) Update(msg tea.Msg) (hiringModel, tea.Cmd) {
 		return m, (&m).nextBatch()
 
 	case hiringPostsMsg:
-		if msg.threadID != m.thread.ID {
+		if msg.gen != m.gen || msg.threadID != m.thread.ID {
 			return m, nil
 		}
 		m.loading = false
@@ -519,8 +539,10 @@ func (m hiringModel) View() string {
 	case m.err != nil:
 		body = styleError.Render("✗ hiring thread unavailable: " + m.err.Error())
 		body += "\n\n" + styleMeta.Render("check your connection, then press r to try again")
-	case len(m.posts) == 0:
+	case len(m.posts) == 0 && m.loading:
 		body = styleMeta.Render(m.spinner.View() + " finding the latest hiring thread…")
+	case len(m.posts) == 0:
+		body = styleMeta.Render("no posts in this thread yet — r reloads it")
 	case len(m.visible) == 0:
 		body = styleMeta.Render("no posts match — edit the filter with /")
 	default:
