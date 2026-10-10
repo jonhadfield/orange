@@ -201,6 +201,19 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		m.story, cmd = m.story.Update(msg)
 		return m, cmd
 
+	case storyItemMsg:
+		current := msg.gen == m.story.gen && msg.item.ID == m.story.story.ID
+		var cmd tea.Cmd
+		m.story, cmd = m.story.Update(msg)
+		if !current || m.st == nil || !m.st.IsWatched(msg.item.ID) {
+			return m, cmd
+		}
+		// Opening marked the story read with the count it was opened
+		// with, which can be stale. Correct it, or comments already on
+		// screen are counted as new on the Watched list.
+		m.st.MarkRead(msg.item.ID, msg.item.Descendants, time.Now().Unix())
+		return m, tea.Batch(cmd, saveStore(m.st))
+
 	case pulseTickMsg:
 		if m.view != viewPulse {
 			// Stop refreshing once the view is left; resume restarts it.
@@ -296,10 +309,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		switch m.view {
 		case viewStory:
 			m.view = m.prevView
-			if m.view == viewPulse {
+			switch m.view {
+			case viewPulse:
 				var cmd tea.Cmd
 				m.pulse, cmd = m.pulse.resume()
 				return m, cmd
+			case viewWatched:
+				// The story just read has moved its read marker on.
+				m.watched = m.watched.catchUp()
 			}
 		case viewPulse, viewWatched, viewHiring, viewSearch:
 			m.view = viewFeeds
@@ -417,6 +434,13 @@ func (m Model) toggleWatch() (Model, tea.Cmd) {
 	}
 	if m.st == nil {
 		m.setNotice(storeUnavailable("watching"), true)
+		return m, nil
+	}
+	if m.view == viewSearch && m.search.mode == searchComments {
+		// A comment result knows its story's id and title but not its
+		// comment count, and watching with none would call the whole
+		// thread new.
+		m.setNotice("open the story with enter to watch it", false)
 		return m, nil
 	}
 	// The list changes now and is written afterwards, so the keypress is

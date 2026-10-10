@@ -52,6 +52,13 @@ type treeMsg struct {
 	err     error
 }
 
+// storyItemMsg is a fresh copy of the open story, fetched on opening
+// because the copy it was opened from can be minutes old.
+type storyItemMsg struct {
+	gen  int
+	item hn.Item
+}
+
 type pastMsg struct {
 	storyID int
 	gen     int
@@ -78,6 +85,10 @@ type storyModel struct {
 	gen      int
 	past     []hn.PastDiscussion
 	newSince int64 // comments after this time are marked new (0 = off)
+	// treeDone is set once the search index's tree has been handled and
+	// the Firebase pass has begun, so comments that arrive later are
+	// queued straight away rather than left for that pass to pick up.
+	treeDone bool
 	loading  bool
 	warn     string // non-fatal loading problem, shown alongside the count
 	err      error
@@ -115,6 +126,7 @@ func (m storyModel) open(it hn.Item, newSince int64) (storyModel, tea.Cmd) {
 	m.queue = nil
 	m.queued = make(map[int]bool)
 	m.inflight = 0
+	m.treeDone = false
 	m.past = nil
 	m.newSince = newSince
 	m.cursor = 0
@@ -123,7 +135,24 @@ func (m storyModel) open(it hn.Item, newSince int64) (storyModel, tea.Cmd) {
 	m.loading = true
 	m.vp.SetYOffset(0)
 	(&m).renderContent()
-	return m, tea.Batch((&m).fetchTree(), m.fetchPast(), m.spinner.Tick)
+	return m, tea.Batch((&m).fetchTree(), m.fetchPast(), m.fetchItem(), m.spinner.Tick)
+}
+
+// fetchItem refetches the story itself. The copy it was opened from may
+// have been fetched with its feed page minutes ago, missing newer
+// top-level comments and showing an old comment count. A failure is
+// silent: the older copy is still a working story.
+func (m *storyModel) fetchItem() tea.Cmd {
+	client, id, gen := m.client, m.story.ID, m.gen
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+		defer cancel()
+		items, err := client.ItemsFresh(ctx, []int{id})
+		if err != nil || len(items) == 0 {
+			return nil
+		}
+		return storyItemMsg{gen: gen, item: items[0]}
+	}
 }
 
 // fetchTree pulls the entire comment tree from Algolia in a single request.
@@ -201,7 +230,10 @@ func (m *storyModel) nextBatch() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 		defer cancel()
-		items, err := client.Items(ctx, ids)
+		// Fresh, not cached: a comment seen on an earlier visit is in the
+		// cache with the replies it had then, and reading it from there
+		// would hide every reply posted since.
+		items, err := client.ItemsFresh(ctx, ids)
 		return commentsMsg{storyID: storyID, gen: gen, items: items, err: err}
 	}
 }
@@ -235,6 +267,19 @@ func (m storyModel) Update(msg tea.Msg) (storyModel, tea.Cmd) {
 		}
 		// Reconcile against Firebase either way: it recovers the comments
 		// Algolia omits, and is the only source if the fast path failed.
+		m.treeDone = true
+		(&m).enqueue(m.story.Kids)
+		return m, (&m).fillBatches()
+
+	case storyItemMsg:
+		if msg.gen != m.gen || msg.item.ID != m.story.ID {
+			return m, nil
+		}
+		m.story = msg.item
+		(&m).renderContent()
+		if !m.treeDone {
+			return m, nil // the Firebase pass will start from these Kids
+		}
 		(&m).enqueue(m.story.Kids)
 		return m, (&m).fillBatches()
 

@@ -113,6 +113,56 @@ func (m watchedModel) selected() (watchedRow, bool) {
 	return watchedRow{}, false
 }
 
+// setRows rebuilds the list from the given stories and the read state in
+// the store, keeping the selection on the same story where it can.
+func (m *watchedModel) setRows(items []hn.Item) {
+	var selectedID int
+	if m.cursor < len(m.rows) {
+		selectedID = m.rows[m.cursor].item.ID
+	}
+	rows := make([]watchedRow, 0, len(items))
+	for _, it := range items {
+		ws, ok := m.st.Get(it.ID)
+		if !ok {
+			continue
+		}
+		rows = append(rows, watchedRow{
+			item:     it,
+			state:    ws,
+			newCount: max(0, it.Descendants-ws.LastComments),
+		})
+	}
+	// Most unread first: W is for catching up, not revisiting what was
+	// opened last. Equal unread counts keep the recent-read order.
+	slices.SortFunc(rows, func(a, b watchedRow) int {
+		if c := cmp.Compare(b.newCount, a.newCount); c != 0 {
+			return c
+		}
+		return cmp.Compare(b.state.LastReadAt, a.state.LastReadAt)
+	})
+	m.rows = rows
+	m.cursor = 0
+	if selectedID != 0 {
+		for i, r := range m.rows {
+			if r.item.ID == selectedID {
+				m.cursor = i
+				break
+			}
+		}
+	}
+}
+
+// catchUp re-reads every row's state from the store without refetching,
+// so a story read or unwatched since the list loaded shows as such.
+func (m watchedModel) catchUp() watchedModel {
+	items := make([]hn.Item, len(m.rows))
+	for i, r := range m.rows {
+		items[i] = r.item
+	}
+	m.setRows(items)
+	return m
+}
+
 func (m watchedModel) Update(msg tea.Msg) (watchedModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
@@ -129,39 +179,7 @@ func (m watchedModel) Update(msg tea.Msg) (watchedModel, tea.Cmd) {
 		if m.err != nil {
 			return m, nil
 		}
-		var selectedID int
-		if m.cursor < len(m.rows) {
-			selectedID = m.rows[m.cursor].item.ID
-		}
-		m.rows = m.rows[:0]
-		for _, it := range msg.items {
-			ws, ok := m.st.Get(it.ID)
-			if !ok {
-				continue
-			}
-			m.rows = append(m.rows, watchedRow{
-				item:     it,
-				state:    ws,
-				newCount: max(0, it.Descendants-ws.LastComments),
-			})
-		}
-		// Most unread first: W is for catching up, not revisiting what was
-		// opened last. Equal unread counts keep the recent-read order.
-		slices.SortFunc(m.rows, func(a, b watchedRow) int {
-			if c := cmp.Compare(b.newCount, a.newCount); c != 0 {
-				return c
-			}
-			return cmp.Compare(b.state.LastReadAt, a.state.LastReadAt)
-		})
-		m.cursor = 0
-		if selectedID != 0 {
-			for i, r := range m.rows {
-				if r.item.ID == selectedID {
-					m.cursor = i
-					break
-				}
-			}
-		}
+		m.setRows(msg.items)
 		return m, nil
 
 	case tea.MouseWheelMsg:
