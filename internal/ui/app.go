@@ -143,6 +143,7 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		m.pulse.spinner.Style = stylePoints
 		m.watched.spinner.Style = stylePoints
 		m.hiring.spinner.Style = stylePoints
+		m.search.spinner.Style = stylePoints
 		return m, nil
 
 	case tea.WindowSizeMsg:
@@ -220,6 +221,14 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		m.watched, cmd = m.watched.Update(msg)
 		return m, cmd
 
+	case searchResultsMsg:
+		// Always to the search, even once the reader has left it: dropped,
+		// the search would stay marked as running and show "searching…"
+		// on return. The search itself ignores answers it no longer wants.
+		var cmd tea.Cmd
+		m.search, cmd = m.search.Update(msg)
+		return m, cmd
+
 	case hiringThreadMsg, hiringPostsMsg, hiringCheckMsg:
 		var cmd tea.Cmd
 		m.hiring, cmd = m.hiring.Update(msg)
@@ -237,6 +246,8 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		m.watched, cmd = m.watched.Update(msg)
 		cmds = append(cmds, cmd)
 		m.hiring, cmd = m.hiring.Update(msg)
+		cmds = append(cmds, cmd)
+		m.search, cmd = m.search.Update(msg)
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 	}

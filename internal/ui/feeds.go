@@ -107,7 +107,7 @@ func (m feedsModel) state() *feedState { return m.states[m.feed()] }
 func (m *feedsModel) setSize(w, h int) { m.width, m.height = w, h }
 
 func (m feedsModel) init() tea.Cmd {
-	return tea.Batch(m.loadFeed(m.feed()), m.spinner.Tick)
+	return m.withSpinner(m.loadFeed(m.feed()))
 }
 
 // selected returns the story under the cursor, if any.
@@ -163,9 +163,29 @@ func (m feedsModel) visibleRows() int {
 func (m feedsModel) maybeLoadMore() tea.Cmd {
 	st := m.state()
 	if st.cursor >= len(st.items)-storyPageSize/3 {
-		return m.loadMore(m.feed())
+		return m.withSpinner(m.loadMore(m.feed()))
 	}
 	return nil
+}
+
+// anyLoading reports whether any feed has a fetch in flight.
+func (m feedsModel) anyLoading() bool {
+	for _, st := range m.states {
+		if st.loading {
+			return true
+		}
+	}
+	return false
+}
+
+// withSpinner pairs a load with a spinner tick, restarting the spinner if
+// it had come to rest. A fresh tick retires any loop already running, so
+// this never makes it spin faster.
+func (m feedsModel) withSpinner(load tea.Cmd) tea.Cmd {
+	if load == nil {
+		return nil
+	}
+	return tea.Batch(load, m.spinner.Tick)
 }
 
 func (m feedsModel) switchFeed(i int) (feedsModel, tea.Cmd) {
@@ -176,10 +196,10 @@ func (m feedsModel) switchFeed(i int) (feedsModel, tea.Cmd) {
 		*st = feedState{}
 	}
 	if len(st.ids) == 0 {
-		return m, m.loadFeed(m.feed())
+		return m, m.withSpinner(m.loadFeed(m.feed()))
 	}
 	if len(st.items) == 0 {
-		return m, m.loadMore(m.feed())
+		return m, m.withSpinner(m.loadMore(m.feed()))
 	}
 	return m, nil
 }
@@ -187,6 +207,12 @@ func (m feedsModel) switchFeed(i int) (feedsModel, tea.Cmd) {
 func (m feedsModel) Update(msg tea.Msg) (feedsModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
+		// Rest when nothing is loading, as the other views do, so an idle
+		// orange is not redrawing twelve times a second. withSpinner starts
+		// it again with the next load.
+		if !m.anyLoading() {
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
@@ -265,7 +291,7 @@ func (m feedsModel) handleKey(msg tea.KeyPressMsg) (feedsModel, tea.Cmd) {
 	case key.Matches(msg, m.keys.Refresh):
 		if !st.loading {
 			*st = feedState{}
-			return m, m.loadFeed(m.feed())
+			return m, m.withSpinner(m.loadFeed(m.feed()))
 		}
 	case key.Matches(msg, m.keys.NextFeed):
 		return m.switchFeed((m.active + 1) % len(feedOrder))

@@ -69,6 +69,12 @@ func Open(path string) (*Store, error) {
 				return nil, err
 			}
 		}
+		// The literal null unmarshals cleanly into a nil map, which the
+		// first watch would then panic on. It holds nothing, like an
+		// empty file.
+		if s.watched == nil {
+			s.watched = map[int]WatchState{}
+		}
 	case !os.IsNotExist(err):
 		return nil, err
 	}

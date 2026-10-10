@@ -157,6 +157,9 @@ func (m searchModel) run() (searchModel, tea.Cmd) {
 func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
+		if !m.loading {
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
