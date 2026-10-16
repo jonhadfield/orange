@@ -454,13 +454,7 @@ func (m *hiringModel) ensureCursorVisible() {
 	if m.cursor >= len(m.lineOf) {
 		return
 	}
-	target := m.lineOf[m.cursor]
-	switch {
-	case target < m.vp.YOffset():
-		m.vp.SetYOffset(target)
-	case target > m.vp.YOffset()+m.vp.Height()-3:
-		m.vp.SetYOffset(target - m.vp.Height() + 3)
-	}
+	m.vp.SetYOffset(followOffset(m.lineOf[m.cursor], m.vp.YOffset(), m.vp.Height(), 3))
 }
 
 func (m *hiringModel) renderContent() {
