@@ -29,6 +29,7 @@ type watchedRow struct {
 }
 
 type watchedDataMsg struct {
+	gen   int
 	items []hn.Item
 	err   error
 }
@@ -47,6 +48,10 @@ type watchedModel struct {
 	err     error
 	width   int
 	height  int
+	// gen numbers each fetch. Re-entering Watched or unwatching starts a
+	// new one without waiting for the last, so a reply carries the gen it
+	// was started under and an overtaken reply is ignored.
+	gen int
 }
 
 func newWatchedModel(client *hn.Client, st *store.Store, keys keyMap) watchedModel {
@@ -90,13 +95,14 @@ func (m *watchedModel) fetch() tea.Cmd {
 	for i, ws := range states {
 		ids[i] = ws.ID
 	}
+	m.gen++
 	m.loading = true
-	client := m.client
+	client, gen := m.client, m.gen
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 		defer cancel()
 		items, err := client.ItemsFresh(ctx, ids)
-		return watchedDataMsg{items: items, err: err}
+		return watchedDataMsg{gen: gen, items: items, err: err}
 	}
 }
 
@@ -174,6 +180,9 @@ func (m watchedModel) Update(msg tea.Msg) (watchedModel, tea.Cmd) {
 		return m, cmd
 
 	case watchedDataMsg:
+		if msg.gen != m.gen {
+			return m, nil
+		}
 		m.loading = false
 		m.warn, m.err = applyFetchErr(msg.err, len(msg.items) > 0, false, "stories")
 		if m.err != nil {

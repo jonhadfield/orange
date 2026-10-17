@@ -141,7 +141,7 @@ func TestReadMarkerUsesTheFreshCommentCount(t *testing.T) {
 func TestWatchedListCatchesUpAfterReading(t *testing.T) {
 	m, _ := watchedTestModel(t)
 	m = press(t, m, "W")
-	m = update(t, m, watchedDataMsg{items: []hn.Item{
+	m = update(t, m, watchedDataMsg{gen: m.watched.gen, items: []hn.Item{
 		{ID: 42, Type: "story", Title: "Watched story", Descendants: 112},
 	}})
 	if n := m.watched.rows[0].newCount; n != 12 {
