@@ -254,6 +254,14 @@ func TestEnterOpensASearchResult(t *testing.T) {
 	m.search = searchWith(result(7, "A found story"), result(8, "Another"))
 
 	next, cmd := m.Update(keyPress("enter"))
+	if cmd == nil {
+		t.Fatal("enter produced no command, so the story will not be fetched")
+	}
+	next, _ = next.Update(cmd())
+	// What the fetch returns: the whole story, which the result was not.
+	next, cmd = next.Update(itemLoadedMsg{seq: next.(Model).openSeq, item: hn.Item{
+		ID: 7, Type: "story", Title: "A found story", Text: "body", Kids: []int{70},
+	}})
 	root := next.(Model)
 
 	if root.view != viewStory {
@@ -435,15 +443,28 @@ func TestOpeningACommentFetchesItsStory(t *testing.T) {
 	}
 }
 
-// TestOpeningAStoryResultDoesNotFetch: a story result is already whole, so
-// it opens without a round trip.
-func TestOpeningAStoryResultDoesNotFetch(t *testing.T) {
+// TestOpeningAStoryResultFetchesTheStory: a story search result is built
+// from the search index, which has no comment IDs and no body text. Opened
+// as it is, an Ask HN post shows no text and the comments depend entirely
+// on the search index's copy of the thread, so it is fetched first.
+func TestOpeningAStoryResultFetchesTheStory(t *testing.T) {
 	m := newTestModel(t)
 	m.view = viewSearch
 	m.search = searchWith(result(7, "A found story"))
 
-	next, _ := m.Update(keyPress("enter"))
-	if got := next.(Model).view; got != viewStory {
-		t.Errorf("view = %v, want the story opened directly", got)
+	next, cmd := m.Update(keyPress("enter"))
+	root := next.(Model)
+	if root.view != viewSearch {
+		t.Errorf("view = %v, want it to wait on the search until the story loads", root.view)
+	}
+	if cmd == nil {
+		t.Fatal("enter produced no command, so nothing was fetched")
+	}
+	open, ok := cmd().(openItemMsg)
+	if !ok || open.id != 7 {
+		t.Fatalf("enter produced %+v, want an openItemMsg for story 7", open)
+	}
+	if root.prevView != viewSearch {
+		t.Errorf("prevView = %v, want the search to be returned to", root.prevView)
 	}
 }

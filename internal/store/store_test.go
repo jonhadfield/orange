@@ -242,6 +242,27 @@ func TestOpenEmptyFile(t *testing.T) {
 	}
 }
 
+// TestOpenNullFile: a file holding the JSON literal null (a hand edit, or
+// any tool that writes out a nil map) unmarshals without error into a nil
+// map, and the first watch then panics on it. It has to behave like an
+// empty file instead.
+func TestOpenNullFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "watched.json")
+	if err := os.WriteFile(path, []byte("null\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open = %v", err)
+	}
+	if !s.Toggle(1, "a story", 0, 1) {
+		t.Fatal("Toggle on a store opened from null did not watch the story")
+	}
+	if !s.IsWatched(1) {
+		t.Error("the story is not watched")
+	}
+}
+
 // TestOpenValidFileIsNotDisturbed guards the other side: a good file must
 // never be moved aside.
 func TestOpenValidFileIsNotDisturbed(t *testing.T) {

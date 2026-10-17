@@ -37,7 +37,10 @@ const (
 
 type browserOpenedMsg struct{ err error }
 
+// itemLoadedMsg is a story fetched for opening. seq is the open request it
+// answers; see Model.openSeq.
 type itemLoadedMsg struct {
+	seq  int
 	item hn.Item
 	err  error
 }
@@ -56,6 +59,13 @@ type Model struct {
 	search   searchModel
 	view     view
 	prevView view // where esc from the story view returns to
+	// openSeq numbers requests to fetch and open a story. Opening another
+	// story or pressing esc moves it on, so a reply that arrives after the
+	// reader has gone elsewhere is recognised as out of date and dropped.
+	openSeq int
+	// openFrom is the view the current open request was made from. The
+	// reply is applied only if the reader is still there.
+	openFrom view
 	width    int
 	height   int
 	notice   string
@@ -133,6 +143,7 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		m.pulse.spinner.Style = stylePoints
 		m.watched.spinner.Style = stylePoints
 		m.hiring.spinner.Style = stylePoints
+		m.search.spinner.Style = stylePoints
 		return m, nil
 
 	case tea.WindowSizeMsg:
@@ -157,18 +168,23 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case openItemMsg:
-		client, id := m.client, msg.id
+		m.openSeq++
+		m.openFrom = m.view
+		client, id, seq := m.client, msg.id, m.openSeq
 		return m, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 			defer cancel()
 			items, err := client.ItemsFresh(ctx, []int{id})
 			if err != nil || len(items) == 0 {
-				return itemLoadedMsg{err: fmt.Errorf("item %d unavailable: %w", id, err)}
+				return itemLoadedMsg{seq: seq, err: fmt.Errorf("item %d unavailable: %w", id, err)}
 			}
-			return itemLoadedMsg{item: items[0]}
+			return itemLoadedMsg{seq: seq, item: items[0]}
 		}
 
 	case itemLoadedMsg:
+		if msg.seq != m.openSeq || m.view != m.openFrom {
+			return m, nil // the reader has moved on
+		}
 		if msg.err != nil {
 			m.setNotice("could not load story: "+msg.err.Error(), false)
 			return m, nil
@@ -185,9 +201,24 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		m.story, cmd = m.story.Update(msg)
 		return m, cmd
 
+	case storyItemMsg:
+		current := msg.gen == m.story.gen && msg.item.ID == m.story.story.ID
+		var cmd tea.Cmd
+		m.story, cmd = m.story.Update(msg)
+		if !current || m.st == nil || !m.st.IsWatched(msg.item.ID) {
+			return m, cmd
+		}
+		// Opening marked the story read with the count it was opened
+		// with, which can be stale. Correct it, or comments already on
+		// screen are counted as new on the Watched list.
+		m.st.MarkRead(msg.item.ID, msg.item.Descendants, time.Now().Unix())
+		return m, tea.Batch(cmd, saveStore(m.st))
+
 	case pulseTickMsg:
 		if m.view != viewPulse {
-			return m, nil // stop refreshing once the view is left
+			// Stop refreshing once the view is left; resume restarts it.
+			m.pulse = m.pulse.dropTick(msg)
+			return m, nil
 		}
 		var cmd tea.Cmd
 		m.pulse, cmd = m.pulse.Update(msg)
@@ -201,6 +232,14 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 	case watchedDataMsg:
 		var cmd tea.Cmd
 		m.watched, cmd = m.watched.Update(msg)
+		return m, cmd
+
+	case searchResultsMsg:
+		// Always to the search, even once the reader has left it: dropped,
+		// the search would stay marked as running and show "searching…"
+		// on return. The search itself ignores answers it no longer wants.
+		var cmd tea.Cmd
+		m.search, cmd = m.search.Update(msg)
 		return m, cmd
 
 	case hiringThreadMsg, hiringPostsMsg, hiringCheckMsg:
@@ -220,6 +259,8 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		m.watched, cmd = m.watched.Update(msg)
 		cmds = append(cmds, cmd)
 		m.hiring, cmd = m.hiring.Update(msg)
+		cmds = append(cmds, cmd)
+		m.search, cmd = m.search.Update(msg)
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 	}
@@ -264,9 +305,19 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.help.ShowAll = false
 			return m, nil
 		}
+		m.openSeq++ // whatever was being opened is no longer wanted
 		switch m.view {
 		case viewStory:
 			m.view = m.prevView
+			switch m.view {
+			case viewPulse:
+				var cmd tea.Cmd
+				m.pulse, cmd = m.pulse.resume()
+				return m, cmd
+			case viewWatched:
+				// The story just read has moved its read marker on.
+				m.watched = m.watched.catchUp()
+			}
 		case viewPulse, viewWatched, viewHiring, viewSearch:
 			m.view = viewFeeds
 		}
@@ -302,9 +353,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.toggleWatch()
 
 	case key.Matches(msg, m.keys.Open) && (m.view == viewFeeds || m.view == viewPulse || m.view == viewWatched || m.view == viewSearch):
-		// A comment result knows only which story it was written under, so
-		// the story is fetched before it is opened. Opening the stub would
-		// show a header with no author, no score and no age.
+		// A search result is only part of a story, so the story is fetched
+		// before it is opened. A comment result would show a header with
+		// no author, score or age; a story result would have no body text
+		// and leave the comments to the search index's copy of the thread.
 		if id, ok := m.search.openTarget(); ok && m.view == viewSearch {
 			m.prevView = viewSearch
 			return m, func() tea.Msg { return openItemMsg{id: id} }
@@ -356,6 +408,7 @@ func (m Model) delegate(msg tea.Msg) (Model, tea.Cmd) {
 // openStory switches to the story view. For watched stories the previous
 // read position highlights new comments, and the read marker advances.
 func (m Model) openStory(it hn.Item, from view) (Model, tea.Cmd) {
+	m.openSeq++ // supersedes any story still being fetched
 	if from != viewStory {
 		m.prevView = from
 	}
@@ -381,6 +434,13 @@ func (m Model) toggleWatch() (Model, tea.Cmd) {
 	}
 	if m.st == nil {
 		m.setNotice(storeUnavailable("watching"), true)
+		return m, nil
+	}
+	if m.view == viewSearch && m.search.mode == searchComments {
+		// A comment result knows its story's id and title but not its
+		// comment count, and watching with none would call the whole
+		// thread new.
+		m.setNotice("open the story with enter to watch it", false)
 		return m, nil
 	}
 	// The list changes now and is written afterwards, so the keypress is

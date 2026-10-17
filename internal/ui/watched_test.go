@@ -26,6 +26,7 @@ func TestWatchedKeepsItemsOnPartialFailure(t *testing.T) {
 	m.setSize(100, 24)
 	m, _ = m.start()
 	m, _ = m.Update(watchedDataMsg{
+		gen: m.gen,
 		items: []hn.Item{
 			{ID: 1, Type: "story", Title: "one", Descendants: 5, Score: 10},
 		},
@@ -57,7 +58,7 @@ func TestWatchedTotalFailureShowsRetryAdvice(t *testing.T) {
 	m := newWatchedModel(nil, st, newKeyMap())
 	m.setSize(100, 24)
 	m, _ = m.start()
-	m, _ = m.Update(watchedDataMsg{err: errors.New("dial failed")})
+	m, _ = m.Update(watchedDataMsg{gen: m.gen, err: errors.New("dial failed")})
 
 	if m.err == nil {
 		t.Fatal("total failure was not recorded")
@@ -81,7 +82,8 @@ func TestWatchedSortsByUnreadCount(t *testing.T) {
 
 	m := newWatchedModel(nil, st, newKeyMap())
 	m.setSize(100, 24)
-	m, _ = m.Update(watchedDataMsg{items: []hn.Item{
+	// No fetch started: gen stays 0, matching a direct reply for the sort check.
+	m, _ = m.Update(watchedDataMsg{gen: m.gen, items: []hn.Item{
 		{ID: 1, Type: "story", Title: "quiet recently", Descendants: 5, Score: 1},
 		{ID: 2, Type: "story", Title: "a few new", Descendants: 10, Score: 2},
 		{ID: 3, Type: "story", Title: "many new", Descendants: 10, Score: 3},
@@ -133,7 +135,7 @@ func TestUnwatchRefetchesRemainingCounts(t *testing.T) {
 	}
 
 	// Simulate the refresh: remaining story picks up newer comment counts.
-	m, _ = m.Update(watchedDataMsg{items: []hn.Item{
+	m, _ = m.Update(watchedDataMsg{gen: m.gen, items: []hn.Item{
 		{ID: 2, Type: "story", Title: "two", Descendants: 9, Score: 10},
 	}})
 	if m.loading {
@@ -141,5 +143,40 @@ func TestUnwatchRefetchesRemainingCounts(t *testing.T) {
 	}
 	if len(m.rows) != 1 || m.rows[0].newCount != 7 {
 		t.Fatalf("refreshed row = %+v, want newCount 7", m.rows)
+	}
+}
+
+// TestStaleWatchedFetchDoesNotOverwriteANewerOne: leaving Watched and
+// pressing W again starts a second fetch without waiting for the first.
+// The slower earlier reply must not replace what the later one loaded, or
+// blank a successful refresh with an older failure.
+func TestStaleWatchedFetchDoesNotOverwriteANewerOne(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "watched.json")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	st.Toggle(1, "one", 0, 100)
+
+	m := newWatchedModel(nil, st, newKeyMap())
+	m.setSize(100, 24)
+	m, _ = m.start()
+	stale := watchedDataMsg{gen: m.gen, err: errors.New("dial failed")}
+
+	m, _ = m.start() // re-entry starts a newer fetch
+	m, _ = m.Update(watchedDataMsg{
+		gen:   m.gen,
+		items: []hn.Item{{ID: 1, Type: "story", Title: "one", Descendants: 3}},
+	})
+	if len(m.rows) != 1 {
+		t.Fatalf("rows after newer fetch = %d, want 1", len(m.rows))
+	}
+
+	m, _ = m.Update(stale)
+	if m.err != nil {
+		t.Errorf("stale failure replaced the newer load: %v", m.err)
+	}
+	if len(m.rows) != 1 || m.rows[0].item.ID != 1 {
+		t.Errorf("stale failure cleared the list: %+v", m.rows)
 	}
 }

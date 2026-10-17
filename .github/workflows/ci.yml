@@ -79,8 +79,10 @@ jobs:
       # tracks the v2 line; the version is pinned so it cannot drift back.
       #
       # The pin moves with the go directive: a golangci-lint cannot typecheck
-      # a standard library newer than the Go it was built with, and v2.12.2
-      # was built with go1.26.2. v2.13.2 is built with go1.27.0.
+      # a standard library newer than the Go it was built with. v2.13.2 was
+      # built with go1.27.0 and cannot read Go 1.27.2's export data (format
+      # version 5). v2.14.0 is the first release that can; pin the current
+      # v2 line so it stays ahead of the go.mod patch.
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.13.2
+          version: v2.15.0

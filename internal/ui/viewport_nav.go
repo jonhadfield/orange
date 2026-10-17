@@ -45,3 +45,19 @@ func cursorLineOffScreen(lineOf []int, cursor, yOffset, height int) bool {
 	line := lineOf[cursor]
 	return line < yOffset || line >= yOffset+height
 }
+
+// followOffset is the y offset that keeps the line at target on screen,
+// with up to margin-1 lines after it showing so the start of the selected
+// block is readable. The margin is capped below the viewport height:
+// uncapped, a viewport shorter than the margin scrolled past target and
+// hid the very line it was meant to show.
+func followOffset(target, yOffset, height, margin int) int {
+	margin = max(1, min(margin, height-1))
+	switch {
+	case target < yOffset:
+		return target
+	case target > yOffset+height-margin:
+		return target - height + margin
+	}
+	return yOffset
+}

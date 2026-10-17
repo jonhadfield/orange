@@ -143,3 +143,38 @@ func isVowel(c byte) bool {
 	}
 	return false
 }
+
+// wrapText word-wraps HN text to width as lipgloss does, except that an
+// indented line keeps its indent on the lines it wraps onto, two further in
+// so a continuation is not mistaken for the next line. Code blocks arrive
+// indented, and wrapped back to column 0 they stop reading as code. Tabs
+// become four spaces, as lipgloss would make them.
+func wrapText(s string, width int) string {
+	width = max(1, width)
+	lines := strings.Split(strings.ReplaceAll(s, "\t", "    "), "\n")
+	for i, line := range lines {
+		body := strings.TrimLeft(line, " ")
+		lead := len(line) - len(body)
+		cont := lead + 2
+		switch {
+		case lead == 0 || body == "":
+			lines[i] = lipgloss.Wrap(line, width, "")
+			continue
+		case cont > width/2:
+			// Too narrow to afford the indent: better flush left than
+			// squeezed into a sliver at the right.
+			lines[i] = lipgloss.Wrap(body, width, "")
+			continue
+		}
+		wrapped := strings.Split(lipgloss.Wrap(body, width-cont, ""), "\n")
+		for j := range wrapped {
+			pad := cont
+			if j == 0 {
+				pad = lead
+			}
+			wrapped[j] = strings.Repeat(" ", pad) + wrapped[j]
+		}
+		lines[i] = strings.Join(wrapped, "\n")
+	}
+	return strings.Join(lines, "\n")
+}
